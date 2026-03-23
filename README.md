@@ -1,1 +1,6 @@
-# DevDecOps-hub
+# DevSecOps-hub
+
+docker-compose up -d
+
+docker-compose down -v
+docker-compose up -d

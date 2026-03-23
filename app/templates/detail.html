@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vulnerability Detail - DevSecOps-hub</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; }
+        .detail-container { max-width: 900px; margin-top: 50px; margin-bottom: 50px; }
+        .info-label { font-weight: bold; color: #6c757d; width: 150px; display: inline-block; }
+        pre { background-color: #f1f3f5; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6; white-space: pre-wrap; word-break: break-all; }
+        .ai-result-area { min-height: 100px; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-dark mb-4">
+        <div class="container">
+            <a class="navbar-brand" href="/">DevSecOps-hub</a>
+        </div>
+    </nav>
+
+    <div class="container detail-container">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h4>취약점 상세 보고서</h4>
+            <a href="/" class="btn btn-outline-secondary btn-sm">리스트로 돌아가기</a>
+        </div>
+
+        <div class="card shadow-sm border-0 p-4 mb-4">
+            <h5 class="mb-4 text-primary">{{ vuln.title }}</h5>
+            
+            <div class="mb-3">
+                <span class="info-label">ID</span>
+                <span>{{ vuln.id }}</span>
+            </div>
+            <div class="mb-3">
+                <span class="info-label">Severity</span>
+                <span class="fw-bold text-uppercase">{{ vuln.severity.value }}</span>
+            </div>
+            <div class="mb-3">
+                <span class="info-label">Category</span>
+                <span class="badge bg-secondary">{{ vuln.category }}</span>
+            </div>
+            <div class="mb-3">
+                <span class="info-label">CVE ID</span>
+                <span class="text-danger fw-bold">{{ vuln.cve_id if vuln.cve_id else 'N/A' }}</span>
+            </div>
+            <div class="mb-3">
+                <span class="info-label">발견 위치</span>
+                <code>{{ vuln.file_path if vuln.file_path else 'Library/Dependency' }}</code>
+                {% if vuln.line_number %} <span>(Line: {{ vuln.line_number }})</span> {% endif %}
+            </div>
+            
+            <hr>
+            
+            <div class="mb-4">
+                <h6 class="fw-bold mb-3 text-secondary">취약점 설명</h6>
+                <p class="text-muted" style="white-space: pre-wrap; line-height: 1.6;">{{ vuln.description if vuln.description else '상세 설명 데이터가 없습니다.' }}</p>
+            </div>
+
+            <div class="mb-4">
+                <h6 class="fw-bold mb-3 text-secondary">권장 조치 (Remediation)</h6>
+                <div class="alert alert-success">
+                    <strong>Fix Version:</strong> {{ vuln.fix_version if vuln.fix_version else '정보 없음' }}
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm border-0 p-4">
+            <h6 class="fw-bold mb-3 text-secondary">AI 보안 분석 결과</h6>
+            <div id="ai-container" class="ai-result-area">
+                <p id="ai-text" class="text-muted">분석 결과가 생성되지 않았습니다. 아래 버튼을 눌러 정밀 분석을 시작하십시오.</p>
+                <div id="loading-spinner" class="spinner-border spinner-border-sm text-primary d-none mb-3" role="status"></div>
+                
+                <button id="analyze-btn" class="btn btn-primary" onclick="runAIAnalysis('{{ vuln.id }}')">AI 분석 실행</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    async function runAIAnalysis(vulnId) {
+        if (!vulnId || vulnId === 'None' || vulnId === '') {
+            alert("취약점 식별자(ID)를 찾을 수 없습니다.");
+            return;
+        }
+
+        const btn = document.getElementById('analyze-btn');
+        const text = document.getElementById('ai-text');
+        const spinner = document.getElementById('loading-spinner');
+
+        // UI 상태 업데이트
+        btn.disabled = true;
+        spinner.classList.remove('d-none');
+        text.innerText = "데이터를 기반으로 AI 분석을 수행 중입니다. 잠시만 기다려 주십시오.";
+        text.classList.add('text-muted');
+
+        try {
+            const response = await fetch(`/vulnerability/${vulnId}/analyze`, { 
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            if (!response.ok) {
+                throw new Error("서버로부터 응답을 받지 못했습니다.");
+            }
+
+            const data = await response.json();
+            
+            // 결과 출력
+            text.style.whiteSpace = "pre-wrap";
+            text.classList.remove('text-muted');
+            text.innerText = data.analysis;
+            
+            // 성공 시 분석 버튼 숨김
+            btn.classList.add('d-none');
+        } catch (error) {
+            text.innerText = "분석 중 오류가 발생했습니다. 시스템 관리자에게 문의하거나 잠시 후 다시 시도하십시오.";
+            btn.disabled = false;
+        } finally {
+            spinner.classList.add('d-none');
+        }
+    }
+    </script>
+</body>
+</html>

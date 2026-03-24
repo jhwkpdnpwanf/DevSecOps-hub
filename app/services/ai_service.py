@@ -2,7 +2,6 @@ import os
 from dotenv import load_dotenv
 from openai import OpenAI
 
-
 class AISecurityService:
     def __init__(self):
         load_dotenv(override=True)
@@ -30,13 +29,13 @@ class AISecurityService:
 4. 이모티콘 없이 전문적인 톤 유지
 """
 
-        response = self.client.responses.create(
+        response = self.client.chat.completions.create(
             model=self.model,
-            input=[
+            messages=[
                 {"role": "system", "content": "당신은 금융권 수준의 보안 가이드를 제공하는 전문가입니다."},
                 {"role": "user", "content": prompt},
             ],
-            max_output_tokens=1000,
+            max_tokens=2000,
         )
 
-        return response.output_text
+        return response.choices[0].message.content

@@ -1,31 +1,35 @@
-import os
 import json
+import os
 import sys
-from sqlalchemy.orm import Session
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from app.database.session import SessionLocal, init_db
-from app.parsers.semgrep import SemgrepParser
-from app.parsers.pip_audit import PipAuditParser
-from app.services.db_service import save_scan_results
 from app.database.models import Project
+from app.database.session import SessionLocal, init_db
+from app.parsers.pip_audit import PipAuditParser
+from app.parsers.semgrep import SemgrepParser
+from app.services.db_service import save_scan_results
+
 
 def run_full_pipeline():
     init_db(force_drop=True)
-    
+
     db = SessionLocal()
 
     try:
         project = db.query(Project).filter(Project.name == "Test-Project").first()
         if not project:
-            project = Project(name="Test-Project", repository_url="https://github.com/test/repo")
+            project = Project(
+                name="Test-Project",
+                repository_url="https://github.com/test/repo",
+                api_token="test-token",
+            )
             db.add(project)
             db.commit()
             print(f"[+] 테스트 프로젝트 생성 완료: {project.name}")
 
         test_dir = os.path.dirname(__file__)
-        
+
         sca_report_path = os.path.join(test_dir, "pip_audit_report.json")
         if os.path.exists(sca_report_path):
             with open(sca_report_path, "r", encoding="utf-8") as f:
@@ -46,8 +50,10 @@ def run_full_pipeline():
 
     except Exception as e:
         print(f"[!] 테스트 중 예외 발생: {e}")
+        raise
     finally:
         db.close()
+
 
 if __name__ == "__main__":
     run_full_pipeline()

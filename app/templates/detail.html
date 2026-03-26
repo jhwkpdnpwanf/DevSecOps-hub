@@ -1,109 +1,65 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vulnerability Detail - DevSecOps-hub</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <style>
-        body { background-color: #f8f9fa; }
-        .detail-container { max-width: 900px; margin-top: 50px; margin-bottom: 50px; }
-        .info-label { font-weight: bold; color: #6c757d; width: 150px; display: inline-block; }
-        .description-box { white-space: pre-wrap; line-height: 1.6; color: #444; }
-        .ai-result-area { min-height: 100px; }
-        #ai-render-target pre { background-color: #f1f3f5; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6; overflow-x: auto; }
-        #ai-render-target p { margin-bottom: 1rem; line-height: 1.6; }
-    </style>
+  <meta charset="UTF-8" />
+  <title>Vulnerability Detail</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; color: #1f2937; }
+    pre { background: #f3f4f6; padding: 16px; white-space: pre-wrap; border-radius: 8px; }
+    .section { margin-top: 24px; }
+    .pill { display: inline-block; border: 1px solid #d1d5db; border-radius: 999px; padding: 4px 10px; margin-right: 8px; }
+  </style>
 </head>
 <body>
-    <nav class="navbar navbar-dark bg-dark mb-4">
-        <div class="container">
-            <a class="navbar-brand" href="/">DevSecOps-hub</a>
-        </div>
-    </nav>
+  <h1>{{ vuln.title }}</h1>
+  <div>
+    <span class="pill">Severity: {{ vuln.severity.value }}</span>
+    <span class="pill">Priority: {{ vuln.priority.value }}</span>
+    <span class="pill">Status: {{ vuln.status.value }}</span>
+  </div>
 
-    <div class="container detail-container">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <h4>취약점 상세 보고서</h4>
-            <a href="/" class="btn btn-outline-secondary btn-sm">리스트로 돌아가기</a>
-        </div>
+  <div class="section">
+    <h2>기본 정보</h2>
+    <p><strong>프로젝트:</strong> {{ vuln.scan.project.name }}</p>
+    <p><strong>도구:</strong> {{ vuln.scan.tool_type.value }}</p>
+    <p><strong>카테고리:</strong> {{ vuln.category }}</p>
+    <p><strong>위치:</strong> {{ vuln.location or '-' }}</p>
+    <p><strong>설명:</strong> {{ vuln.description or '-' }}</p>
+  </div>
 
-        <div class="card shadow-sm border-0 p-4 mb-4">
-            <h5 class="mb-4 text-primary">{{ vuln.title }}</h5>
-            
-            <div class="mb-3">
-                <span class="info-label">ID</span>
-                <span>{{ vuln.id }}</span>
-            </div>
-            <div class="mb-3">
-                <span class="info-label">Severity</span>
-                <span class="badge bg-danger text-uppercase">{{ vuln.severity.value }}</span>
-            </div>
-            
-            <hr>
-            
-            <div class="mb-4">
-                <h6 class="fw-bold mb-3 text-secondary">취약점 설명</h6>
-                <div class="description-box">{{ vuln.description if vuln.description else '상세 설명 데이터가 없습니다.' }}</div>
-            </div>
-        </div>
+  <div class="section">
+    <h2>할당 이력</h2>
+    {% if vuln.assignments %}
+      <ul>
+      {% for assignment in vuln.assignments %}
+        <li>{{ assignment.assignee.username }} / {{ assignment.assigned_at }} / due {{ assignment.due_date or '-' }}</li>
+      {% endfor %}
+      </ul>
+    {% else %}
+      <p>할당 이력이 없습니다.</p>
+    {% endif %}
+  </div>
 
-        <div class="card shadow-sm border-0 p-4">
-            <h6 class="fw-bold mb-3 text-secondary">AI 보안 분석 결과</h6>
-            <div id="ai-container" class="ai-result-area">
-                <div id="ai-render-target" 
-                     data-analysis="{{ existing_analysis.summary if existing_analysis else '' }}">
-                    {% if not existing_analysis %}
-                    <p id="ai-placeholder" class="text-muted">분석 결과가 생성되지 않았습니다. 아래 버튼을 눌러 정밀 분석을 시작하십시오.</p>
-                    {% endif %}
-                </div>
-                
-                <div id="loading-spinner" class="spinner-border spinner-border-sm text-primary d-none mb-3" role="status"></div>
-                
-                {% if not existing_analysis %}
-                <button id="analyze-btn" class="btn btn-primary mt-3" onclick="runAIAnalysis('{{ vuln.id }}')">AI 분석 실행</button>
-                {% endif %}
-            </div>
-        </div>
-    </div>
+  <div class="section">
+    <h2>상태 이력</h2>
+    {% if vuln.status_history %}
+      <ul>
+      {% for history in vuln.status_history %}
+        <li>{{ history.changed_at }} / {{ history.changed_by }} / {{ history.from_status or '-' }} → {{ history.to_status }} / {{ history.comment or '-' }}</li>
+      {% endfor %}
+      </ul>
+    {% else %}
+      <p>상태 이력이 없습니다.</p>
+    {% endif %}
+  </div>
 
-    <script>
-    window.onload = function() {
-        const renderTarget = document.getElementById('ai-render-target');
-        const cachedData = renderTarget.dataset.analysis;
-
-        if (cachedData && cachedData.trim() !== "") {
-            renderTarget.innerHTML = marked.parse(cachedData);
-        }
-    };
-
-    async function runAIAnalysis(vulnId) {
-        const btn = document.getElementById('analyze-btn');
-        const renderTarget = document.getElementById('ai-render-target');
-        const spinner = document.getElementById('loading-spinner');
-
-        if (btn) btn.disabled = true;
-        spinner.classList.remove('d-none');
-        renderTarget.innerText = "데이터를 기반으로 AI 분석을 수행 중입니다. 잠시만 기다려 주십시오.";
-
-        try {
-            const response = await fetch(`/vulnerability/${vulnId}/analyze`, { 
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            });
-
-            const data = await response.json();
-            
-            renderTarget.innerHTML = marked.parse(data.analysis);
-            if (btn) btn.classList.add('d-none');
-        } catch (error) {
-            renderTarget.innerText = "분석 중 오류가 발생했습니다.";
-            if (btn) btn.disabled = false;
-        } finally {
-            spinner.classList.add('d-none');
-        }
-    }
-    </script>
+  <div class="section">
+    <h2>AI 분석</h2>
+    {% if existing_analysis %}
+      <pre>{{ existing_analysis.summary }}</pre>
+    {% else %}
+      <p>AI 분석이 아직 생성되지 않았습니다. API를 통해 /api/vulnerabilities/{{ vuln.id }}/analyze 호출 시 생성됩니다.</p>
+    {% endif %}
+  </div>
 </body>
 </html>

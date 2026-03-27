@@ -4,62 +4,152 @@
   <meta charset="UTF-8" />
   <title>Vulnerability Detail</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 40px; color: #1f2937; }
-    pre { background: #f3f4f6; padding: 16px; white-space: pre-wrap; border-radius: 8px; }
-    .section { margin-top: 24px; }
-    .pill { display: inline-block; border: 1px solid #d1d5db; border-radius: 999px; padding: 4px 10px; margin-right: 8px; }
+    body { margin:0; font-family: Arial, sans-serif; background:#f3f4f6; color:#111827; }
+    .layout { display:flex; min-height:100vh; }
+    .sidebar { width:240px; background:#111827; color:#f9fafb; padding:20px 14px; }
+    .sidebar a { color:#e5e7eb; display:block; text-decoration:none; padding:10px; border-radius:8px; margin-bottom: 10px; }
+    .sidebar a:hover { background:#1f2937; }
+    .content { flex:1; padding:20px 24px; }
+    .panel { background:#fff; border:1px solid #d1d5db; border-radius:10px; padding:14px; margin-bottom:14px; }
+    .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+    .item { border:1px solid #e5e7eb; border-radius:8px; padding:10px; }
+    .sev-Critical { border-left:6px solid #dc2626; }
+    .sev-High { border-left:6px solid #ea580c; }
+    .sev-Medium { border-left:6px solid #d97706; }
+    .sev-Low { border-left:6px solid #2563eb; }
+    .sev-Info { border-left:6px solid #6b7280; }
+    button, input, select { padding:8px; margin-right:6px; }
+    .msg { margin-top:8px; font-weight:600; }
+    #analysisHtml { border:1px solid #e5e7eb; border-radius:8px; padding:10px; background:#fcfcfc; min-height: 50px; }
+    .loading { color:#2563eb; font-weight: bold; }
   </style>
 </head>
 <body>
-  <h1>{{ vuln.title }}</h1>
-  <div>
-    <span class="pill">Severity: {{ vuln.severity.value }}</span>
-    <span class="pill">Priority: {{ vuln.priority.value }}</span>
-    <span class="pill">Status: {{ vuln.status.value }}</span>
+  <div class="layout">
+    <aside class="sidebar">
+      <h2>DevSecOps Hub</h2>
+      <a href="/?project_id={{ back_project_id }}">← 이전 프로젝트 목록</a>
+      <p><strong>User:</strong> {{ current_user.username }}<br>({{ current_user.role.value }})</p>
+    </aside>
+
+    <main class="content">
+      <div class="panel sev-{{ vuln.severity.value|replace(' ', '') }}">
+        <h1>{{ vuln.title }}</h1>
+        <p>프로젝트: {{ vuln.scan.project.name }} | 도구: {{ vuln.scan.tool_type.value }}</p>
+      </div>
+
+      <div class="panel grid">
+        <div class="item"><strong>Severity</strong><br>{{ vuln.severity.value }}</div>
+        <div class="item"><strong>Priority</strong><br>{{ vuln.priority.value }}</div>
+        <div class="item"><strong>Status</strong><br><span id="statusText">{{ vuln.status.value }}</span></div>
+      </div>
+
+      {% if can_operate %}
+      <div class="panel">
+        <h2>운영 액션</h2>
+        <div>
+          <select id="statusInput">
+            <option>TRIAGED</option>
+            <option>IN_PROGRESS</option>
+            <option>FIXED</option>
+            <option>VERIFIED</option>
+            <option>CLOSED</option>
+          </select>
+          <input id="statusUser" value="{{ current_user.username }}" readonly style="background:#eee;"/>
+          <button onclick="updateStatus()">상태 변경</button>
+        </div>
+        <div style="margin-top:10px;">
+          <input id="assigneeInput" placeholder="담당자 username" />
+          <button onclick="assignVuln()">담당자 할당</button>
+        </div>
+        <div style="margin-top:10px;">
+          <button onclick="previewPolicy()">정책 검사</button>
+          <span id="policyPreview" class="msg"></span>
+        </div>
+        <div id="actionMsg" class="msg"></div>
+      </div>
+      {% endif %}
+
+      <div class="panel">
+        <h2>AI 분석</h2>
+        {% if can_operate %}
+        <button onclick="runAnalysis()">AI 분석 실행/불러오기</button>
+        <p id="analysisLoading" class="loading" style="display:none;">AI 분석 중...</p>
+        {% endif %}
+        <div id="analysisHtml">
+          {% if existing_analysis %}
+            {{ existing_analysis_html | safe }}
+          {% else %}
+            AI 분석이 아직 생성되지 않았습니다.
+          {% endif %}
+        </div>
+      </div>
+    </main>
   </div>
 
-  <div class="section">
-    <h2>기본 정보</h2>
-    <p><strong>프로젝트:</strong> {{ vuln.scan.project.name }}</p>
-    <p><strong>도구:</strong> {{ vuln.scan.tool_type.value }}</p>
-    <p><strong>카테고리:</strong> {{ vuln.category }}</p>
-    <p><strong>위치:</strong> {{ vuln.location or '-' }}</p>
-    <p><strong>설명:</strong> {{ vuln.description or '-' }}</p>
-  </div>
+<script>
+const vulnId = {{ vuln.id }};
 
-  <div class="section">
-    <h2>할당 이력</h2>
-    {% if vuln.assignments %}
-      <ul>
-      {% for assignment in vuln.assignments %}
-        <li>{{ assignment.assignee.username }} / {{ assignment.assigned_at }} / due {{ assignment.due_date or '-' }}</li>
-      {% endfor %}
-      </ul>
-    {% else %}
-      <p>할당 이력이 없습니다.</p>
-    {% endif %}
-  </div>
+async function runAnalysis() {
+  const loading = document.getElementById('analysisLoading');
+  const box = document.getElementById('analysisHtml');
+  if (loading) loading.style.display = 'block';
+  box.innerHTML = '분석 요청 중...';
+  try {
+    const resp = await fetch(`/api/vulnerabilities/${vulnId}/analyze`, { method: 'POST' });
+    const data = await resp.json();
+    box.innerHTML = data.analysis_html || (data.analysis || '').replace(/\n/g, '<br/>');
+    const msg = document.getElementById('actionMsg');
+    if (msg) msg.textContent = data.cached ? '저장된 AI 분석 결과를 불러왔습니다.' : '새 AI 분석 결과를 생성/저장했습니다.';
+  } finally {
+    if (loading) loading.style.display = 'none';
+  }
+}
 
-  <div class="section">
-    <h2>상태 이력</h2>
-    {% if vuln.status_history %}
-      <ul>
-      {% for history in vuln.status_history %}
-        <li>{{ history.changed_at }} / {{ history.changed_by }} / {{ history.from_status or '-' }} → {{ history.to_status }} / {{ history.comment or '-' }}</li>
-      {% endfor %}
-      </ul>
-    {% else %}
-      <p>상태 이력이 없습니다.</p>
-    {% endif %}
-  </div>
+async function updateStatus() {
+  const payload = {
+    status: document.getElementById('statusInput').value,
+    changed_by: document.getElementById('statusUser').value,
+    comment: 'Detail 페이지에서 상태 변경'
+  };
+  const resp = await fetch(`/api/vulnerabilities/${vulnId}/status`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  });
+  const data = await resp.json();
+  const msg = document.getElementById('actionMsg');
+  if (resp.ok) {
+    document.getElementById('statusText').textContent = data.to;
+    msg.textContent = `상태 변경 완료: ${data.from} → ${data.to}`;
+  } else {
+    msg.textContent = data.detail || '상태 변경 실패';
+  }
+}
 
-  <div class="section">
-    <h2>AI 분석</h2>
-    {% if existing_analysis %}
-      <pre>{{ existing_analysis.summary }}</pre>
-    {% else %}
-      <p>AI 분석이 아직 생성되지 않았습니다. API를 통해 /api/vulnerabilities/{{ vuln.id }}/analyze 호출 시 생성됩니다.</p>
-    {% endif %}
-  </div>
+async function assignVuln() {
+  const username = document.getElementById('assigneeInput').value;
+  if (!username) return;
+  const resp = await fetch(`/api/vulnerabilities/${vulnId}/assign`, {
+    method: 'POST', 
+    headers: { 'Content-Type': 'application/json' }, 
+    body: JSON.stringify({ username, changed_by: '{{ current_user.username }}' })
+  });
+  const data = await resp.json();
+  const msg = document.getElementById('actionMsg');
+  if (resp.ok) {
+    msg.textContent = `담당자 할당 완료: ${data.assignee} (상태: ${data.new_status})`;
+    document.getElementById('statusText').textContent = data.new_status;
+  } else {
+    msg.textContent = data.detail || '할당 실패';
+  }
+}
+
+async function previewPolicy() {
+  const resp = await fetch(`/api/vulnerabilities/${vulnId}/policy-preview`);
+  const data = await resp.json();
+  document.getElementById('policyPreview').textContent = resp.ok
+    ? `Priority ${data.calculated_priority}, SLA ${data.sla_days}일`
+    : (data.detail || '정책 평가 실패');
+}
+</script>
 </body>
 </html>

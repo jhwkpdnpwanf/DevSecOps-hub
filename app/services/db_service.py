@@ -3,25 +3,9 @@ from typing import Iterable
 
 from sqlalchemy.orm import Session
 
-from app.database.models import (
-    AuditLog,
-    Priority,
-    Project,
-    Scan,
-    Severity,
-    ToolType,
-    Vulnerability,
-    VulnerabilityStatusHistory,
-)
-
-
-SEVERITY_PRIORITY_MAP = {
-    Severity.CRITICAL: (Priority.P0, 1),
-    Severity.HIGH: (Priority.P1, 3),
-    Severity.MEDIUM: (Priority.P2, 7),
-    Severity.LOW: (Priority.P3, 30),
-    Severity.INFO: (Priority.P3, 30),
-}
+from app.database.models import Project, Scan, ToolType, Vulnerability, VulnerabilityStatusHistory
+from app.services.audit_service import write_audit_log
+from app.services.policy_service import PolicyEngine
 
 
 def _coerce_tool_type(tool_type: str | ToolType) -> ToolType:
@@ -43,27 +27,41 @@ def _coerce_tool_type(tool_type: str | ToolType) -> ToolType:
     return mapping[normalized]
 
 
-def _apply_policy(vulnerability: Vulnerability, project: Project | None) -> None:
-    priority, sla_days = SEVERITY_PRIORITY_MAP.get(vulnerability.severity, (Priority.P3, 30))
-
-    if project and project.business_criticality.value == "CORE" and priority != Priority.P0:
-        priority = Priority.P1 if priority in {Priority.P2, Priority.P3} else priority
-        sla_days = min(sla_days, 3)
-
-    if project and project.exposure.value == "PUBLIC" and priority in {Priority.P2, Priority.P3}:
-        priority = Priority.P1
-        sla_days = min(sla_days, 3)
-
+def _apply_policy(vulnerability: Vulnerability, project: Project) -> None:
+    priority, sla_days = PolicyEngine.evaluate_priority(
+        vulnerability.severity,
+        project.business_criticality.value,
+        project.exposure.value,
+    )
     vulnerability.priority = priority
     vulnerability.due_date = datetime.utcnow() + timedelta(days=sla_days)
 
 
-def save_scan_results(db: Session, project_id: int, tool_type: str | ToolType, vulnerabilities: Iterable[Vulnerability]):
+def save_scan_results(
+    db: Session,
+    project_id: int,
+    tool_type: str | ToolType,
+    vulnerabilities: Iterable[Vulnerability],
+    *,
+    initiated_by: str = "system:ingestion",
+    branch: str | None = None,
+    commit_sha: str | None = None,
+    pipeline_run_id: str | None = None,
+    s3_report_path: str | None = None,
+):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise ValueError(f"project_id={project_id} 프로젝트가 존재하지 않습니다.")
 
-    new_scan = Scan(project_id=project_id, tool_type=_coerce_tool_type(tool_type))
+    new_scan = Scan(
+        project_id=project_id,
+        tool_type=_coerce_tool_type(tool_type),
+        initiated_by=initiated_by,
+        branch=branch,
+        commit_sha=commit_sha,
+        pipeline_run_id=pipeline_run_id,
+        s3_report_path=s3_report_path,
+    )
     db.add(new_scan)
     db.flush()
 
@@ -79,20 +77,23 @@ def save_scan_results(db: Session, project_id: int, tool_type: str | ToolType, v
                 vulnerability_id=vulnerability.id,
                 from_status=None,
                 to_status=vulnerability.status.value,
-                changed_by="system:ingestion",
+                changed_by=initiated_by,
                 comment="초기 탐지 결과 등록",
             )
         )
         count += 1
 
-    db.add(
-        AuditLog(
-            user_id="system:ingestion",
-            action="CREATE_SCAN",
-            target_type="scan",
-            target_id=str(new_scan.id),
-            details={"tool_type": new_scan.tool_type.value, "vulnerability_count": count},
-        )
+    write_audit_log(
+        db,
+        actor=initiated_by,
+        action="CREATE_SCAN",
+        target_type="scan",
+        target_id=str(new_scan.id),
+        details={
+            "tool_type": new_scan.tool_type.value,
+            "vulnerability_count": count,
+            "project_id": project_id,
+        },
     )
 
     db.commit()

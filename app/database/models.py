@@ -67,6 +67,10 @@ class Exposure(str, enum.Enum):
     PUBLIC = "PUBLIC"
     INTERNAL = "INTERNAL"
 
+class IntegrationType(str, enum.Enum):
+    SLACK = "SLACK"
+    JIRA = "JIRA"
+    GITHUB = "GITHUB"
 
 class User(Base):
     __tablename__ = "users"
@@ -89,6 +93,7 @@ class Project(Base):
     name = Column(String(255), unique=True, nullable=False)
     repository_url = Column(String(500), nullable=True)
     api_token = Column(String(255), unique=True, nullable=False, index=True)
+    owner_team = Column(String(255), nullable=True)
     s3_prefix = Column(String(255), nullable=True)
     business_criticality = Column(Enum(Criticality), default=Criticality.STANDARD, nullable=False)
     exposure = Column(Enum(Exposure), default=Exposure.INTERNAL, nullable=False)
@@ -104,6 +109,7 @@ class Scan(Base):
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     tool_type = Column(Enum(ToolType), nullable=False)
     scan_date = Column(DateTime, default=datetime.utcnow, nullable=False)
+    initiated_by = Column(String(255), nullable=True)
     branch = Column(String(255), nullable=True)
     commit_sha = Column(String(255), nullable=True)
     pipeline_run_id = Column(String(255), nullable=True)
@@ -184,6 +190,27 @@ class AIAnalysis(Base):
 
     vulnerability = relationship("Vulnerability", back_populates="analysis")
 
+class Policy(Base):
+    __tablename__ = "policies"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=False, unique=True)
+    rule_expression = Column(Text, nullable=False)
+    priority_result = Column(Enum(Priority), nullable=False)
+    sla_days = Column(Integer, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class Integration(Base):
+    __tablename__ = "integrations"
+
+    id = Column(Integer, primary_key=True)
+    integration_type = Column(Enum(IntegrationType), nullable=False)
+    config_name = Column(String(255), nullable=False)
+    enabled = Column(Boolean, default=False, nullable=False)
+    masked_config = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"

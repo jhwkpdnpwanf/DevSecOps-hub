@@ -2,52 +2,121 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>DevSecOps Hub</title>
+  <title>DevSecOps Hub - Dashboard</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 40px; color: #1f2937; }
-    table { border-collapse: collapse; width: 100%; margin-top: 16px; }
-    th, td { border: 1px solid #d1d5db; padding: 10px; text-align: left; }
-    th { background: #f3f4f6; }
-    .cards { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
-    .card { border: 1px solid #d1d5db; border-radius: 8px; padding: 12px 16px; min-width: 140px; }
-    a { color: #1d4ed8; text-decoration: none; }
+    body { margin:0; font-family: Arial, sans-serif; color:#111827; background:#f3f4f6; }
+    .layout { display:flex; min-height:100vh; }
+    .sidebar { width:240px; background:#111827; color:#f9fafb; padding:20px 14px; display: flex; flex-direction: column; }
+    .brand { font-size:22px; font-weight:700; margin-bottom:30px; color: #60a5fa; }
+    .nav { flex: 1; }
+    .nav a { display:block; color:#e5e7eb; text-decoration:none; padding:12px; border-radius:8px; margin-bottom:6px; transition: 0.2s; }
+    .nav a:hover, .nav .active { background:#1f2937; color: white; }
+    .user { margin-top:auto; padding-top: 20px; border-top: 1px solid #374151; font-size:13px; color:#93c5fd; }
+    .user button { margin-top: 10px; width: 100%; padding: 8px; background: #374151; color: white; border: none; border-radius: 6px; cursor: pointer; }
+    .user button:hover { background: #4b5563; }
+    .content { flex:1; padding:20px 32px; overflow-y: auto; }
+    .panel { background:#fff; border:1px solid #d1d5db; border-radius:12px; padding:20px; margin-bottom:20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .cards { display:flex; gap:12px; flex-wrap:wrap; margin-bottom: 20px; }
+    .card { border:1px solid #d1d5db; border-radius:8px; padding:16px; min-width:140px; background: #fff; }
+    .sev-Critical { border-left:6px solid #dc2626; }
+    .sev-High { border-left:6px solid #ea580c; }
+    .sev-Medium { border-left:6px solid #d97706; }
+    .sev-Low { border-left:6px solid #2563eb; }
+    .sev-Info { border-left:6px solid #6b7280; }
+    .finding { display:block; text-decoration:none; color:inherit; margin-bottom: 12px; transition: transform 0.1s; }
+    .finding:hover { transform: translateY(-2px); box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+    .finding-title { font-weight:700; font-size: 1.1rem; margin-bottom:6px; color: #1e40af; }
+    .meta { color:#6b7280; font-size:13px; margin-bottom: 8px; }
+    .description { font-size: 0.95rem; color: #374151; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    button, select { padding:10px; border-radius: 6px; border: 1px solid #d1d5db; }
+    h2 { margin-top: 0; font-size: 1.25rem; margin-bottom: 15px; }
   </style>
 </head>
 <body>
-  <h1>DevSecOps Hub Dashboard</h1>
-  <p>최근 취약점과 통계를 확인할 수 있습니다.</p>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">DevSecOps Hub</div>
+      <nav class="nav">
+        <a class="active" href="/">Dashboard</a>
+        <a href="#">Projects</a>
+        <a href="#">Code Findings</a>
+        <a href="#">Rules & Policies</a>
+      </nav>
+      <div class="user">
+        <div><strong>{{ current_user.username }}</strong></div>
+        <div>{{ current_user.role.value }}</div>
+        <div style="font-size: 11px; opacity: 0.8;">{{ current_user.email }}</div>
+        <form onsubmit="logout(event)">
+          <button type="submit">로그아웃</button>
+        </form>
+      </div>
+    </aside>
 
-  <div class="cards">
-    <div class="card"><strong>Total</strong><br />{{ stats.total }}</div>
-    {% for severity, count in stats.severity.items() %}
-      <div class="card"><strong>{{ severity }}</strong><br />{{ count }}</div>
-    {% endfor %}
+    <main class="content">
+      <div class="panel">
+        <h2>프로젝트 데이터 조회</h2>
+        <form method="get" action="/">
+          <select id="project_id" name="project_id" required style="min-width: 250px;">
+            <option value="">프로젝트를 선택하세요</option>
+            {% for project in projects %}
+              <option value="{{ project.id }}" {% if selected_project and project.id == selected_project.id %}selected{% endif %}>{{ project.name }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" style="background: #2563eb; color: white; border: none; cursor: pointer;">데이터 로드</button>
+        </form>
+        {% if selected_project and not is_authorized %}
+          <p style="color:#b91c1c; font-weight:600; margin-top: 10px;">{{ permission_error }}</p>
+        {% endif %}
+      </div>
+
+      {% if selected_project and is_authorized %}
+        <div class="panel">
+          <h2>{{ selected_project.name }} 통계 요약</h2>
+          <div class="cards">
+            <div class="card" style="background: #f8fafc;"><strong>Total Findings</strong><br/><span style="font-size: 24px; font-weight: bold;">{{ stats.total }}</span></div>
+            {% for severity, count in stats.severity.items() %}
+              <div class="card sev-{{ severity|replace(' ', '') }}"><strong>{{ severity }}</strong><br/><span style="font-size: 24px; font-weight: bold;">{{ count }}</span></div>
+            {% endfor %}
+          </div>
+          <h3 style="font-size: 1rem; color: #4b5563;">도구별 탐지 분포</h3>
+          <div class="cards">
+            {% for tool, count in tool_stats.items() %}
+              <div class="card" style="min-width: 100px;"><strong>{{ tool }}</strong><br/>{{ count }} 건</div>
+            {% else %}
+              <p style="color: #9ca3af;">스캔 데이터가 존재하지 않습니다.</p>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="panel" style="background: transparent; border: none; padding: 0;">
+          <h2 style="padding-left: 5px;">취약점 목록</h2>
+          {% for vuln in vulns %}
+            <a class="finding panel sev-{{ vuln.severity.value|replace(' ', '') }}" href="/vulnerability/{{ vuln.id }}?project_id={{ selected_project.id }}">
+              <div class="finding-title">{{ vuln.title }}</div>
+              <div class="meta">
+                <span style="font-weight: bold; color: #111827;">{{ vuln.severity.value }}</span> · 
+                <span>{{ vuln.priority.value }}</span> · 
+                <span style="background: #e5e7eb; padding: 2px 6px; border-radius: 4px;">{{ vuln.status.value }}</span> · 
+                <span>{{ vuln.scan.tool_type.value }}</span>
+              </div>
+              <div class="description">{{ vuln.description or '-' }}</div>
+            </a>
+          {% else %}
+            <div class="panel">
+              <p style="color: #6b7280; text-align: center;">조건에 맞는 취약점이 없습니다.</p>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </main>
   </div>
 
-  <h2>최근 취약점</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>ID</th>
-        <th>제목</th>
-        <th>심각도</th>
-        <th>우선순위</th>
-        <th>상태</th>
-        <th>도구</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for vuln in vulns %}
-      <tr>
-        <td>{{ vuln.id }}</td>
-        <td><a href="/vulnerability/{{ vuln.id }}">{{ vuln.title }}</a></td>
-        <td>{{ vuln.severity.value }}</td>
-        <td>{{ vuln.priority.value }}</td>
-        <td>{{ vuln.status.value }}</td>
-        <td>{{ vuln.scan.tool_type.value }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<script>
+async function logout(e) {
+  e.preventDefault();
+  await fetch('/auth/logout', { method: 'POST' });
+  window.location.href = '/auth/login';
+}
+</script>
 </body>
 </html>

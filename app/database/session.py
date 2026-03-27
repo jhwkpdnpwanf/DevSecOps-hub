@@ -43,20 +43,21 @@ def create_database_if_not_exists() -> None:
         temp_engine.dispose()
         return
 
-    with temp_engine.connect() as conn:
-        if DB_BACKEND.startswith("postgresql"):
-            exists = conn.execute(
-                text("SELECT 1 FROM pg_database WHERE datname=:db_name"),
-                {"db_name": db_name},
-            ).scalar()
-            if not exists:
+    try:
+        with temp_engine.connect() as conn:
+            if DB_BACKEND.startswith("postgresql"):
+                exists = conn.execute(
+                    text("SELECT 1 FROM pg_database WHERE datname=:db_name"),
+                    {"db_name": db_name},
+                ).scalar()
+                if not exists:
+                    conn.execute(text(create_stmt))
+                    conn.commit()
+            else:
                 conn.execute(text(create_stmt))
                 conn.commit()
-        else:
-            conn.execute(text(create_stmt))
-            conn.commit()
-
-    temp_engine.dispose()
+    finally:
+        temp_engine.dispose()
 
 
 def init_db(force_drop: bool = False) -> None:

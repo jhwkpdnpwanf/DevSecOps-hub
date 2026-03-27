@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>DevSecOps Hub Login</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f3f4f6; display:flex; justify-content:center; align-items:center; height:100vh; }
+    .card { background:white; border:1px solid #d1d5db; border-radius:10px; padding:24px; width:380px; }
+    input, button { width:100%; padding:10px; margin-top:8px; }
+    .hint { color:#6b7280; font-size:13px; margin-top:8px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>DevSecOps Hub 로그인</h2>
+    <p class="hint">Mock OAuth: 이메일 패턴으로 자동 권한 부여 (admin*, security*, viewer*, 그 외 developer)</p>
+    <input id="email" placeholder="security-team@example.com" />
+    <button onclick="login()">로그인</button>
+    <p id="msg" class="hint"></p>
+  </div>
+
+<script>
+async function login() {
+  const email = document.getElementById('email').value;
+  const resp = await fetch('/auth/mock-login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email })
+  });
+  const data = await resp.json();
+  if (resp.ok) {
+    window.location.href = '/';
+  } else {
+    document.getElementById('msg').textContent = data.detail || '로그인 실패';
+  }
+}
+</script>
+</body>
+</html>

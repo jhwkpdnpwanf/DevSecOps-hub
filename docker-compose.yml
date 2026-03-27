@@ -1,17 +1,42 @@
 version: '3.8'
 
 services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: devsecops-hub-app
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-mysql+pymysql://root:${MYSQL_ROOT_PASSWORD}@db:3306/${MYSQL_DATABASE}}
+      SESSION_SECRET: ${SESSION_SECRET:-change-this-session-secret}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AWS_REGION: ${AWS_REGION:-}
+      AWS_S3_REPORT_BUCKET: ${AWS_S3_REPORT_BUCKET:-}
+      AWS_S3_PREFIX_ROOT: ${AWS_S3_PREFIX_ROOT:-devsecops-hub}
+    depends_on:
+      db:
+        condition: service_healthy
+
   db:
-    image: mysql:latest
+    image: mysql:8.0
     container_name: mysql-db
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-devsecops_hub}
     ports:
       - "3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   redis:
     image: redis:latest

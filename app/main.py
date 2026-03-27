@@ -42,6 +42,9 @@ ai_service = AISecurityService()
 md = MarkdownIt("commonmark", {"html": False, "linkify": True})
 aws_storage = AWSStorageService()
 
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok"}
 
 class IngestRequest(BaseModel):
     project_name: str

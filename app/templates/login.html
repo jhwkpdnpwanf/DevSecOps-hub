@@ -4,10 +4,27 @@
   <meta charset="UTF-8" />
   <title>DevSecOps Hub Login</title>
   <style>
-    body { font-family: Arial, sans-serif; background: #f3f4f6; display:flex; justify-content:center; align-items:center; height:100vh; }
-    .card { background:white; border:1px solid #d1d5db; border-radius:10px; padding:24px; width:380px; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f3f4f6;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 16px;
+    }
+    .card {
+      background: white;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      padding: 24px;
+      width: min(100%, 420px);
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+    }
     input, button { width:100%; padding:10px; margin-top:8px; }
-    .hint { color:#6b7280; font-size:13px; margin-top:8px; }
+    .hint { color:#6b7280; font-size:13px; margin-top:8px; line-height: 1.45; }
   </style>
 </head>
 <body>

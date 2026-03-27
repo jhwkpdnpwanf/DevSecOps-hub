@@ -4,48 +4,77 @@
   <meta charset="UTF-8" />
   <title>DevSecOps Hub - Dashboard</title>
   <style>
+    * { box-sizing: border-box; }
     body { margin:0; font-family: Arial, sans-serif; color:#111827; background:#f3f4f6; }
+
     .layout { display:flex; min-height:100vh; }
-    .sidebar { width:240px; background:#111827; color:#f9fafb; padding:20px 14px; display: flex; flex-direction: column; }
-    .brand { font-size:22px; font-weight:700; margin-bottom:30px; color: #60a5fa; }
-    .nav { flex: 1; }
-    .nav a { display:block; color:#e5e7eb; text-decoration:none; padding:12px; border-radius:8px; margin-bottom:6px; transition: 0.2s; }
-    .nav a:hover, .nav .active { background:#1f2937; color: white; }
-    .user { margin-top:auto; padding-top: 20px; border-top: 1px solid #374151; font-size:13px; color:#93c5fd; }
-    .user button { margin-top: 10px; width: 100%; padding: 8px; background: #374151; color: white; border: none; border-radius: 6px; cursor: pointer; }
-    .user button:hover { background: #4b5563; }
-    .content { flex:1; padding:20px 32px; overflow-y: auto; }
-    .panel { background:#fff; border:1px solid #d1d5db; border-radius:12px; padding:20px; margin-bottom:20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    .cards { display:flex; gap:12px; flex-wrap:wrap; margin-bottom: 20px; }
-    .card { border:1px solid #d1d5db; border-radius:8px; padding:16px; min-width:140px; background: #fff; }
-    .sev-Critical { border-left:6px solid #dc2626; }
-    .sev-High { border-left:6px solid #ea580c; }
-    .sev-Medium { border-left:6px solid #d97706; }
-    .sev-Low { border-left:6px solid #2563eb; }
-    .sev-Info { border-left:6px solid #6b7280; }
-    .finding { display:block; text-decoration:none; color:inherit; margin-bottom: 12px; transition: transform 0.1s; }
-    .finding:hover { transform: translateY(-2px); box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-    .finding-title { font-weight:700; font-size: 1.1rem; margin-bottom:6px; color: #1e40af; }
-    .meta { color:#6b7280; font-size:13px; margin-bottom: 8px; }
-    .description { font-size: 0.95rem; color: #374151; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    button, select { padding:10px; border-radius: 6px; border: 1px solid #d1d5db; }
-    h2 { margin-top: 0; font-size: 1.25rem; margin-bottom: 15px; }
+    .sidebar { width:240px; background:#111827; color:#f9fafb; padding:20px 14px; display:flex; flex-direction:column; }
+    .brand { font-size:22px; font-weight:700; margin-bottom:30px; color:#60a5fa; }
+    .nav { flex:1; }
+    .nav a { display:block; color:#e5e7eb; text-decoration:none; padding:12px; border-radius:8px; margin-bottom:6px; }
+    .nav a:hover, .nav .active { background:#1f2937; color:white; }
+
+    .user { margin-top:auto; padding-top:20px; border-top:1px solid #374151; font-size:13px; color:#93c5fd; }
+    .user button { margin-top:10px; width:100%; padding:8px; background:#374151; color:white; border:none; border-radius:6px; cursor:pointer; }
+    .user button:hover { background:#4b5563; }
+
+    .content { flex:1; padding:20px 32px; overflow-y:auto; }
+    .panel { background:#fff; border:1px solid #d1d5db; border-radius:12px; padding:20px; margin-bottom:20px; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
+    .cards { display:flex; gap:12px; flex-wrap:wrap; }
+    .card { border:1px solid #d1d5db; border-radius:10px; padding:16px; min-width:140px; background:#fff; }
+
+    .table { width:100%; border-collapse:collapse; }
+    .table th, .table td { border-bottom:1px solid #e5e7eb; text-align:left; padding:10px 8px; }
+    .table th { background:#f8fafc; }
+    .muted { color:#6b7280; }
+
+    .finding-list { display:flex; flex-direction:column; gap:12px; }
+    .finding {
+      display:flex;
+      text-decoration:none;
+      color:inherit;
+      border:1px solid #d1d5db;
+      border-radius:12px;
+      background:#fff;
+      overflow:hidden;
+      transition:transform 0.1s;
+      width: 100%;
+    }
+    .finding:hover { transform:translateY(-2px); box-shadow:0 4px 6px rgba(0,0,0,0.05); }
+    .finding-rail { width:40px; flex-shrink: 0; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:18px; background:#ef4444; }
+    .rail-medium { background:#d97706; }
+    .rail-low { background:#2563eb; }
+    .rail-info { background:#6b7280; }
+    .finding-body { padding:14px 16px; flex:1; min-width: 0; }
+    .finding-title { font-weight:700; font-size:1.1rem; margin-bottom:6px; color:#1e40af; }
+    .meta { color:#6b7280; font-size:13px; margin-bottom:8px; }
+    .description { font-size:0.95rem; color:#374151; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+    .sev-badge { padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; }
+    .sev-badge-critical, .sev-badge-high { background:#fee2e2; color:#991b1b; }
+    .sev-badge-medium { background:#fef3c7; color:#92400e; }
+    .sev-badge-low { background:#dbeafe; color:#1e3a8a; }
+    .sev-badge-info { background:#e5e7eb; color:#374151; }
+
+    button, select, input { padding:10px; border-radius:6px; border:1px solid #d1d5db; }
+    h2 { margin-top:0; margin-bottom:15px; }
   </style>
 </head>
 <body>
+  {% set current_section = request.query_params.get('section') or 'dashboard' %}
   <div class="layout">
     <aside class="sidebar">
       <div class="brand">DevSecOps Hub</div>
       <nav class="nav">
-        <a class="active" href="/">Dashboard</a>
-        <a href="#">Projects</a>
-        <a href="#">Code Findings</a>
-        <a href="#">Rules & Policies</a>
+        <a class="{% if current_section == 'dashboard' %}active{% endif %}" href="/?section=dashboard{% if selected_project %}&project_id={{ selected_project.id }}{% endif %}">Dashboard</a>
+        <a class="{% if current_section == 'projects' %}active{% endif %}" href="/?section=projects{% if selected_project %}&project_id={{ selected_project.id }}{% endif %}">Projects</a>
+        <a class="{% if current_section == 'findings' %}active{% endif %}" href="/?section=findings{% if selected_project %}&project_id={{ selected_project.id }}{% endif %}">Code Findings</a>
+        <a class="{% if current_section == 'policies' %}active{% endif %}" href="/?section=policies{% if selected_project %}&project_id={{ selected_project.id }}{% endif %}">Rules & Policies</a>
       </nav>
       <div class="user">
         <div><strong>{{ current_user.username }}</strong></div>
         <div>{{ current_user.role.value }}</div>
-        <div style="font-size: 11px; opacity: 0.8;">{{ current_user.email }}</div>
+        <div style="font-size:11px; opacity:0.8;">{{ current_user.email }}</div>
         <form onsubmit="logout(event)">
           <button type="submit">로그아웃</button>
         </form>
@@ -55,58 +84,110 @@
     <main class="content">
       <div class="panel">
         <h2>프로젝트 데이터 조회</h2>
-        <form method="get" action="/">
-          <select id="project_id" name="project_id" required style="min-width: 250px;">
+        <form method="get" action="/" style="display:flex; gap:8px; flex-wrap:wrap;">
+          <input type="hidden" name="section" value="{{ current_section }}" />
+          <select id="project_id" name="project_id" required style="min-width:250px;">
             <option value="">프로젝트를 선택하세요</option>
             {% for project in projects %}
               <option value="{{ project.id }}" {% if selected_project and project.id == selected_project.id %}selected{% endif %}>{{ project.name }}</option>
             {% endfor %}
           </select>
-          <button type="submit" style="background: #2563eb; color: white; border: none; cursor: pointer;">데이터 로드</button>
+          <button type="submit" style="background:#2563eb; color:white; border:none; cursor:pointer;">데이터 로드</button>
         </form>
         {% if selected_project and not is_authorized %}
-          <p style="color:#b91c1c; font-weight:600; margin-top: 10px;">{{ permission_error }}</p>
+          <p style="color:#b91c1c; font-weight:600; margin-top:10px;">{{ permission_error }}</p>
         {% endif %}
       </div>
 
-      {% if selected_project and is_authorized %}
+      {% if current_section == 'projects' %}
+      <div class="panel">
+        <h2>Projects</h2>
+        <table class="table">
+          <thead><tr><th>프로젝트명</th><th>Owner Team</th><th>바로가기</th></tr></thead>
+          <tbody>
+            {% for project in projects %}
+              <tr>
+                <td>{{ project.name }}</td>
+                <td>{{ project.owner_team or '-' }}</td>
+                <td><a href="/?section=dashboard&project_id={{ project.id }}">대시보드 보기</a></td>
+              </tr>
+            {% else %}
+              <tr><td colspan="3" class="muted">등록된 프로젝트가 없습니다.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+
+      {% if current_section == 'policies' %}
+      <div class="panel">
+        <h2>Rules & Policies</h2>
+        <p class="muted">현재 정책 목록을 API에서 불러옵니다.</p>
+        <button onclick="loadPolicies()" style="background:#111827; color:#fff; border:none; cursor:pointer;">정책 새로고침</button>
+        <div id="policyBox" style="margin-top:12px;"></div>
+      </div>
+      {% endif %}
+
+      {% if current_section in ['dashboard','findings'] and selected_project and is_authorized %}
+        {% if current_section == 'dashboard' %}
         <div class="panel">
           <h2>{{ selected_project.name }} 통계 요약</h2>
           <div class="cards">
-            <div class="card" style="background: #f8fafc;"><strong>Total Findings</strong><br/><span style="font-size: 24px; font-weight: bold;">{{ stats.total }}</span></div>
+            <div class="card"><strong>Total Findings</strong><br/><span style="font-size:24px; font-weight:bold;">{{ stats.total }}</span></div>
             {% for severity, count in stats.severity.items() %}
-              <div class="card sev-{{ severity|replace(' ', '') }}"><strong>{{ severity }}</strong><br/><span style="font-size: 24px; font-weight: bold;">{{ count }}</span></div>
+              <div class="card"><strong>{{ severity }}</strong><br/><span style="font-size:24px; font-weight:bold;">{{ count }}</span></div>
             {% endfor %}
           </div>
-          <h3 style="font-size: 1rem; color: #4b5563;">도구별 탐지 분포</h3>
+
+          <h3 style="font-size:1rem; color:#4b5563;">도구별 탐지 분포</h3>
           <div class="cards">
             {% for tool, count in tool_stats.items() %}
-              <div class="card" style="min-width: 100px;"><strong>{{ tool }}</strong><br/>{{ count }} 건</div>
+              <div class="card" style="min-width:100px;"><strong>{{ tool }}</strong><br/>{{ count }} 건</div>
             {% else %}
-              <p style="color: #9ca3af;">스캔 데이터가 존재하지 않습니다.</p>
+              <p class="muted">스캔 데이터가 존재하지 않습니다.</p>
             {% endfor %}
           </div>
         </div>
 
-        <div class="panel" style="background: transparent; border: none; padding: 0;">
-          <h2 style="padding-left: 5px;">취약점 목록</h2>
-          {% for vuln in vulns %}
-            <a class="finding panel sev-{{ vuln.severity.value|replace(' ', '') }}" href="/vulnerability/{{ vuln.id }}?project_id={{ selected_project.id }}">
-              <div class="finding-title">{{ vuln.title }}</div>
-              <div class="meta">
-                <span style="font-weight: bold; color: #111827;">{{ vuln.severity.value }}</span> · 
-                <span>{{ vuln.priority.value }}</span> · 
-                <span style="background: #e5e7eb; padding: 2px 6px; border-radius: 4px;">{{ vuln.status.value }}</span> · 
-                <span>{{ vuln.scan.tool_type.value }}</span>
-              </div>
-              <div class="description">{{ vuln.description or '-' }}</div>
-            </a>
-          {% else %}
-            <div class="panel">
-              <p style="color: #6b7280; text-align: center;">조건에 맞는 취약점이 없습니다.</p>
-            </div>
-          {% endfor %}
+        <div class="panel">
+          <h2>S3 리포트 연동</h2>
+          <p class="muted">프로젝트명을 기준으로 S3 report 목록을 불러와 즉시 import 할 수 있습니다.</p>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <input id="s3ProjectName" value="{{ selected_project.name }}" style="min-width:240px;" />
+            <button onclick="loadS3Reports()" style="background:#0f766e; color:#fff; border:none; cursor:pointer;">S3 목록 조회</button>
+          </div>
+          <div id="s3Status" class="muted" style="margin-top:10px;"></div>
+          <div id="s3Reports" style="margin-top:10px;"></div>
         </div>
+        {% endif %}
+
+        <div class="panel" style="background:transparent; border:none; padding:0; box-shadow:none;">
+          <h2 style="padding-left:5px;">취약점 목록</h2>
+          <div class="finding-list">
+            {% for vuln in vulns %}
+              {% set sev = vuln.severity.value.lower() %}
+              <a class="finding" href="/vulnerability/{{ vuln.id }}?project_id={{ selected_project.id }}">
+                <div class="finding-rail {% if sev == 'medium' %}rail-medium{% elif sev == 'low' %}rail-low{% elif sev == 'info' %}rail-info{% endif %}">{{ loop.index }}</div>
+                <div class="finding-body">
+                  <div class="finding-title">{{ vuln.title }}</div>
+                  <div class="meta">
+                    <span class="sev-badge sev-badge-{{ sev if sev in ['critical','high','medium','low','info'] else 'info' }}">{{ vuln.severity.value }}</span>
+                    · <span>{{ vuln.priority.value }}</span>
+                    · <span style="background:#e5e7eb; padding:2px 6px; border-radius:4px;">{{ vuln.status.value }}</span>
+                    · <span>{{ vuln.scan.tool_type.value }}</span>
+                  </div>
+                  <div class="description">{{ vuln.description or '-' }}</div>
+                </div>
+              </a>
+            {% else %}
+              <div class="panel"><p class="muted" style="text-align:center;">조건에 맞는 취약점이 없습니다.</p></div>
+            {% endfor %}
+          </div>
+        </div>
+      {% elif current_section in ['dashboard','findings'] and selected_project and not is_authorized %}
+        <div class="panel"><p style="color:#b91c1c;">{{ permission_error }}</p></div>
+      {% elif current_section in ['dashboard','findings'] %}
+        <div class="panel"><p class="muted">먼저 프로젝트를 선택해 주세요.</p></div>
       {% endif %}
     </main>
   </div>
@@ -117,6 +198,81 @@ async function logout(e) {
   await fetch('/auth/logout', { method: 'POST' });
   window.location.href = '/auth/login';
 }
+
+async function loadPolicies() {
+  const box = document.getElementById('policyBox');
+  if (!box) return;
+  box.innerHTML = '불러오는 중...';
+
+  const resp = await fetch('/api/policies');
+  const data = await resp.json();
+  if (!resp.ok) {
+    box.innerHTML = `<p style="color:#b91c1c;">${data.detail || '정책 조회 실패'}</p>`;
+    return;
+  }
+  if (!data.length) {
+    box.innerHTML = '<p class="muted">등록된 정책이 없습니다.</p>';
+    return;
+  }
+
+  box.innerHTML = `<table class="table"><thead><tr><th>Name</th><th>Rule</th><th>Priority</th><th>SLA</th></tr></thead><tbody>${data.map(p => `<tr><td>${p.name}</td><td>${p.rule_expression}</td><td>${p.priority_result}</td><td>${p.sla_days}일</td></tr>`).join('')}</tbody></table>`;
+}
+
+async function loadS3Reports() {
+  const status = document.getElementById('s3Status');
+  const reportsBox = document.getElementById('s3Reports');
+  if (!status || !reportsBox) return;
+
+  const projectName = document.getElementById('s3ProjectName').value.trim();
+  if (!projectName) {
+    status.textContent = '프로젝트명을 입력하세요.';
+    return;
+  }
+
+  status.textContent = 'S3 목록 조회 중...';
+  reportsBox.innerHTML = '';
+
+  const resp = await fetch(`/api/aws/reports?project_name=${encodeURIComponent(projectName)}`);
+  const data = await resp.json();
+  if (!resp.ok) {
+    status.innerHTML = `<span style="color:#b91c1c;">${data.detail || 'S3 목록 조회 실패'}</span>`;
+    return;
+  }
+
+  const reports = data.reports || [];
+  status.textContent = `Bucket: ${data.bucket}, ${reports.length}개 리포트`;
+
+  if (!reports.length) {
+    reportsBox.innerHTML = '<p class="muted">조회된 리포트가 없습니다.</p>';
+    return;
+  }
+
+  reportsBox.innerHTML = `<table class="table"><thead><tr><th>S3 Key</th><th>Tool</th><th>Updated</th><th>Import</th></tr></thead><tbody>${reports.map(r => `<tr><td>${r.key}</td><td>${r.tool_type || '-'}</td><td>${r.last_modified || '-'}</td><td><button onclick="importS3Report('${r.key.replace(/'/g, "\\'")}','${projectName.replace(/'/g, "\\'")}')">Import</button></td></tr>`).join('')}</tbody></table>`;
+}
+
+async function importS3Report(s3Key, projectName) {
+  const status = document.getElementById('s3Status');
+  status.textContent = `Import 중: ${s3Key}`;
+
+  const resp = await fetch('/api/aws/import-report', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_name: projectName, s3_key: s3Key })
+  });
+  const data = await resp.json();
+
+  if (!resp.ok) {
+    status.innerHTML = `<span style="color:#b91c1c;">${data.detail || 'Import 실패'}</span>`;
+    return;
+  }
+
+  status.innerHTML = `<span style="color:#166534;">Import 완료: scan #${data.scan_id}, ${data.vulnerability_count}건</span>`;
+  setTimeout(() => window.location.reload(), 600);
+}
+
+{% if current_section == 'policies' %}
+loadPolicies();
+{% endif %}
 </script>
 </body>
 </html>

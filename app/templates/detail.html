@@ -4,49 +4,72 @@
   <meta charset="UTF-8" />
   <title>Vulnerability Detail</title>
   <style>
+    * { box-sizing: border-box; }
     body { margin:0; font-family: Arial, sans-serif; background:#f3f4f6; color:#111827; }
     .layout { display:flex; min-height:100vh; }
     .sidebar { width:240px; background:#111827; color:#f9fafb; padding:20px 14px; }
-    .sidebar a { color:#e5e7eb; display:block; text-decoration:none; padding:10px; border-radius:8px; margin-bottom: 10px; }
+    .sidebar a { color:#e5e7eb; display:block; text-decoration:none; padding:10px; border-radius:8px; margin-bottom:10px; }
     .sidebar a:hover { background:#1f2937; }
+
     .content { flex:1; padding:20px 24px; }
-    .panel { background:#fff; border:1px solid #d1d5db; border-radius:10px; padding:14px; margin-bottom:14px; }
+    .panel { background:#fff; border:1px solid #d1d5db; border-radius:10px; margin-bottom:14px; }
+    .panel-body { padding:14px; }
+
+    .header { display:flex; overflow:hidden; border-radius:10px; }
+    .header-rail { width:56px; background:#ef4444; }
+    .header-body { padding:14px 16px; flex:1; }
+
     .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
-    .item { border:1px solid #e5e7eb; border-radius:8px; padding:10px; }
-    .sev-Critical { border-left:6px solid #dc2626; }
-    .sev-High { border-left:6px solid #ea580c; }
-    .sev-Medium { border-left:6px solid #d97706; }
-    .sev-Low { border-left:6px solid #2563eb; }
-    .sev-Info { border-left:6px solid #6b7280; }
-    button, input, select { padding:8px; margin-right:6px; }
+    .item { border:1px solid #e5e7eb; border-radius:8px; padding:10px; background:#fff; }
+
+    .sev-badge { padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; }
+    .sev-badge-critical, .sev-badge-high { background:#fee2e2; color:#991b1b; }
+    .sev-badge-medium { background:#fef3c7; color:#92400e; }
+    .sev-badge-low { background:#dbeafe; color:#1e3a8a; }
+    .sev-badge-info { background:#e5e7eb; color:#374151; }
+
+    button, input, select { padding:8px; margin-right:6px; border:1px solid #d1d5db; border-radius:8px; }
     .msg { margin-top:8px; font-weight:600; }
-    #analysisHtml { border:1px solid #e5e7eb; border-radius:8px; padding:10px; background:#fcfcfc; min-height: 50px; }
-    .loading { color:#2563eb; font-weight: bold; }
+    #analysisHtml { border:1px solid #e5e7eb; border-radius:8px; padding:10px; background:#fcfcfc; min-height:50px; }
+    .loading { color:#2563eb; font-weight:bold; }
   </style>
 </head>
 <body>
+  {% set sev = vuln.severity.value.lower() %}
   <div class="layout">
     <aside class="sidebar">
       <h2>DevSecOps Hub</h2>
-      <a href="/?project_id={{ back_project_id }}">← 이전 프로젝트 목록</a>
-      <p><strong>User:</strong> {{ current_user.username }}<br>({{ current_user.role.value }})</p>
+      <a href="/?section=findings&project_id={{ back_project_id }}">← 이전 프로젝트 목록</a>
+      <p><strong>User:</strong> {{ current_user.username }}<br/>({{ current_user.role.value }})</p>
     </aside>
 
     <main class="content">
-      <div class="panel sev-{{ vuln.severity.value|replace(' ', '') }}">
-        <h1>{{ vuln.title }}</h1>
-        <p>프로젝트: {{ vuln.scan.project.name }} | 도구: {{ vuln.scan.tool_type.value }}</p>
+      <div class="panel header">
+        <div
+          class="header-rail"
+          style="{% if sev == 'low' %}background:#2563eb;{% elif sev == 'medium' %}background:#d97706;{% elif sev == 'info' %}background:#6b7280;{% else %}background:#ef4444;{% endif %}"
+        ></div>
+        <div class="header-body">
+          <h1 style="margin:0 0 8px 0;">{{ vuln.title }}</h1>
+          <p style="margin:0; color:#4b5563;">
+            <span class="sev-badge sev-badge-{{ sev if sev in ['critical','high','medium','low','info'] else 'info' }}">{{ vuln.severity.value }}</span>
+            · {{ vuln.priority.value }} · {{ vuln.status.value }} · {{ vuln.scan.tool_type.value }}
+          </p>
+          <p style="margin:8px 0 0 0; color:#4b5563;">프로젝트: {{ vuln.scan.project.name }}</p>
+        </div>
       </div>
 
-      <div class="panel grid">
-        <div class="item"><strong>Severity</strong><br>{{ vuln.severity.value }}</div>
-        <div class="item"><strong>Priority</strong><br>{{ vuln.priority.value }}</div>
-        <div class="item"><strong>Status</strong><br><span id="statusText">{{ vuln.status.value }}</span></div>
+      <div class="panel panel-body">
+        <div class="grid">
+          <div class="item"><strong>Severity</strong><br/>{{ vuln.severity.value }}</div>
+          <div class="item"><strong>Priority</strong><br/>{{ vuln.priority.value }}</div>
+          <div class="item"><strong>Status</strong><br/><span id="statusText">{{ vuln.status.value }}</span></div>
+        </div>
       </div>
 
       {% if can_operate %}
-      <div class="panel">
-        <h2>운영 액션</h2>
+      <div class="panel panel-body">
+        <h2 style="margin-top:0;">운영 액션</h2>
         <div>
           <select id="statusInput">
             <option>TRIAGED</option>
@@ -58,10 +81,12 @@
           <input id="statusUser" value="{{ current_user.username }}" readonly style="background:#eee;"/>
           <button onclick="updateStatus()">상태 변경</button>
         </div>
+
         <div style="margin-top:10px;">
           <input id="assigneeInput" placeholder="담당자 username" />
           <button onclick="assignVuln()">담당자 할당</button>
         </div>
+
         <div style="margin-top:10px;">
           <button onclick="previewPolicy()">정책 검사</button>
           <span id="policyPreview" class="msg"></span>
@@ -70,8 +95,8 @@
       </div>
       {% endif %}
 
-      <div class="panel">
-        <h2>AI 분석</h2>
+      <div class="panel panel-body">
+        <h2 style="margin-top:0;">AI 분석</h2>
         {% if can_operate %}
         <button onclick="runAnalysis()">AI 분석 실행/불러오기</button>
         <p id="analysisLoading" class="loading" style="display:none;">AI 분석 중...</p>
@@ -113,7 +138,9 @@ async function updateStatus() {
     comment: 'Detail 페이지에서 상태 변경'
   };
   const resp = await fetch(`/api/vulnerabilities/${vulnId}/status`, {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
   });
   const data = await resp.json();
   const msg = document.getElementById('actionMsg');
@@ -128,9 +155,10 @@ async function updateStatus() {
 async function assignVuln() {
   const username = document.getElementById('assigneeInput').value;
   if (!username) return;
+
   const resp = await fetch(`/api/vulnerabilities/${vulnId}/assign`, {
-    method: 'POST', 
-    headers: { 'Content-Type': 'application/json' }, 
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, changed_by: '{{ current_user.username }}' })
   });
   const data = await resp.json();

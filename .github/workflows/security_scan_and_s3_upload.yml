@@ -1,0 +1,87 @@
+name: security-scan-and-s3-ingest
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  scan-upload-and-ingest:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      S3_BUCKET: ${{ secrets.AWS_S3_REPORT_BUCKET }}
+      HUB_URL: ${{ secrets.DEVSECOPS_HUB_URL }}
+      PROJECT_NAME: ${{ secrets.DEVSECOPS_PROJECT_NAME }}
+      PROJECT_TOKEN: ${{ secrets.DEVSECOPS_PROJECT_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install scanners
+        run: |
+          pip install semgrep pip-audit
+
+      - name: Run Semgrep against test folder
+        run: |
+          semgrep scan --config auto --json --output semgrep_report.json test || true
+
+      - name: Run pip-audit against test requirements
+        run: |
+          pip-audit -r test/requirements.txt --format json > pip_audit_report.json || true
+
+      - name: Upload reports to S3
+        id: upload
+        run: |
+          RUN_ID="${{ github.run_id }}"
+          BASE="devsecops-hub/${PROJECT_NAME}"
+
+          SAST_KEY="${BASE}/sast/${RUN_ID}/report.json"
+          SCA_KEY="${BASE}/sca/${RUN_ID}/report.json"
+
+          aws s3 cp semgrep_report.json "s3://${S3_BUCKET}/${SAST_KEY}"
+          aws s3 cp pip_audit_report.json "s3://${S3_BUCKET}/${SCA_KEY}"
+
+          echo "sast_key=${SAST_KEY}" >> "$GITHUB_OUTPUT"
+          echo "sca_key=${SCA_KEY}" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger Hub normalization from S3 (Semgrep)
+        run: |
+          curl -sS -X POST "${HUB_URL}/api/ingest-from-s3" \
+            -H "Content-Type: application/json" \
+            -H "X-Project-Token: ${PROJECT_TOKEN}" \
+            -d '{
+              "project_name":"'"${PROJECT_NAME}"'",
+              "s3_key":"'"${{ steps.upload.outputs.sast_key }}"'",
+              "tool_type":"Semgrep",
+              "initiated_by":"github-actions"
+            }'
+
+      - name: Trigger Hub normalization from S3 (pip-audit)
+        run: |
+          curl -sS -X POST "${HUB_URL}/api/ingest-from-s3" \
+            -H "Content-Type: application/json" \
+            -H "X-Project-Token: ${PROJECT_TOKEN}" \
+            -d '{
+              "project_name":"'"${PROJECT_NAME}"'",
+              "s3_key":"'"${{ steps.upload.outputs.sca_key }}"'",
+              "tool_type":"pip-audit",
+              "initiated_by":"github-actions"
+            }'

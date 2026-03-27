@@ -32,6 +32,7 @@ from app.services.ai_service import AISecurityService
 from app.services.audit_service import write_audit_log
 from app.services.db_service import save_scan_results
 from app.services.policy_service import PolicyEngine
+from app.services.aws_storage_service import AWSStorageService
 
 init_db()
 app = FastAPI(title="DevSecOps-hub API")
@@ -39,6 +40,7 @@ app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET", "de
 templates = Jinja2Templates(directory="app/templates")
 ai_service = AISecurityService()
 md = MarkdownIt("commonmark", {"html": False, "linkify": True})
+aws_storage = AWSStorageService()
 
 
 class IngestRequest(BaseModel):
@@ -73,6 +75,14 @@ class PolicyCreateRequest(BaseModel):
 
 class MockLoginRequest(BaseModel):
     email: str
+
+
+
+class S3ImportRequest(BaseModel):
+    project_name: str
+    s3_key: str
+    tool_type: ToolType | None = None
+    initiated_by: str = "aws-import"
 
 
 def _map_role_by_email(email: str) -> UserRole:
@@ -335,7 +345,9 @@ def update_vulnerability_status(vuln_id: int, payload: StatusUpdateRequest, requ
             raise HTTPException(status_code=400, detail=f"허용되지 않은 상태 전이: {previous.value} -> {payload.status.value}")
 
     vuln.status = payload.status
+
     db.add(VulnerabilityStatusHistory(vulnerability_id=vuln.id, from_status=previous.value if previous else None, to_status=payload.status.value, changed_by=payload.changed_by, comment=payload.comment))
+
     write_audit_log(db, actor=payload.changed_by, action="UPDATE_STATUS", target_type="vulnerability", target_id=str(vuln.id), details={"from": previous.value if previous else None, "to": payload.status.value})
 
     db.commit()
@@ -387,11 +399,136 @@ async def analyze_vuln(vuln_id: int, request: Request, db: Session = Depends(get
         return {"analysis": existing_analysis.summary, "analysis_html": md.render(existing_analysis.summary), "cached": True}
 
     analysis_report = ai_service.analyze_vulnerability(title=vuln.title, description=vuln.description, category=vuln.category)
+
     db.add(AIAnalysis(vulnerability_id=vuln.id, model_name=ai_service.model, summary=analysis_report, confidence_score=100))
     write_audit_log(db, actor=current_user.username, action="GENERATE_AI_ANALYSIS", target_type="vulnerability", target_id=str(vuln.id))
 
     db.commit()
     return {"analysis": analysis_report, "analysis_html": md.render(analysis_report), "cached": False}
+
+
+@app.get("/api/aws/reports")
+def list_aws_reports(
+    request: Request,
+    project_name: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    _get_session_user(request, db)
+    if not aws_storage.is_configured():
+        raise HTTPException(status_code=400, detail="AWS_S3_REPORT_BUCKET 설정이 필요합니다.")
+
+    try:
+        reports = aws_storage.list_reports(project_name)
+        return {
+            "bucket": aws_storage.bucket,
+            "project": project_name,
+            "reports": [r.__dict__ for r in reports],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/aws/import-report")
+def import_aws_report(payload: S3ImportRequest, request: Request, db: Session = Depends(get_db)):
+    current_user = _get_session_user(request, db)
+    if not _can_operate(current_user):
+        raise HTTPException(status_code=403, detail="운영 액션 권한이 없습니다.")
+
+    if not aws_storage.is_configured():
+        raise HTTPException(status_code=400, detail="AWS_S3_REPORT_BUCKET 설정이 필요합니다.")
+
+    project = _ensure_project_with_token(db, payload.project_name)
+    report = aws_storage.read_report_json(payload.s3_key)
+
+    tool_type = payload.tool_type or aws_storage._guess_tool_type_from_key(payload.s3_key)
+    parser_map = {
+        ToolType.SAST: SemgrepParser(),
+        ToolType.SCA: PipAuditParser(),
+        ToolType.DAST: ZAPParser(),
+    }
+    parser = parser_map.get(tool_type)
+    if not parser:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 파서: {tool_type.value}")
+
+    vulnerabilities = parser.parse(report, scan_id=0)
+    scan_id = save_scan_results(
+        db,
+        project.id,
+        tool_type,
+        vulnerabilities,
+        initiated_by=payload.initiated_by or current_user.username,
+        s3_report_path=f"s3://{aws_storage.bucket}/{payload.s3_key}",
+    )
+
+    write_audit_log(
+        db,
+        actor=current_user.username,
+        action="IMPORT_S3_REPORT",
+        target_type="scan",
+        target_id=str(scan_id),
+        details={"s3_key": payload.s3_key, "tool_type": tool_type.value},
+    )
+    db.commit()
+
+    return {
+        "project": project.name,
+        "scan_id": scan_id,
+        "tool_type": tool_type.value,
+        "s3_key": payload.s3_key,
+        "vulnerability_count": len(vulnerabilities),
+    }
+
+
+@app.post("/api/ingest-from-s3")
+def ingest_from_s3_for_ci(
+    payload: S3ImportRequest,
+    db: Session = Depends(get_db),
+    x_project_token: str | None = Header(default=None),
+):
+    if not aws_storage.is_configured():
+        raise HTTPException(status_code=400, detail="AWS_S3_REPORT_BUCKET 설정이 필요합니다.")
+
+    project = _ensure_project_with_token(db, payload.project_name)
+    _validate_project_token(project, x_project_token)
+
+    report = aws_storage.read_report_json(payload.s3_key)
+    tool_type = payload.tool_type or aws_storage._guess_tool_type_from_key(payload.s3_key)
+
+    parser_map = {
+        ToolType.SAST: SemgrepParser(),
+        ToolType.SCA: PipAuditParser(),
+        ToolType.DAST: ZAPParser(),
+    }
+    parser = parser_map.get(tool_type)
+    if not parser:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 파서: {tool_type.value}")
+
+    vulnerabilities = parser.parse(report, scan_id=0)
+    scan_id = save_scan_results(
+        db,
+        project.id,
+        tool_type,
+        vulnerabilities,
+        initiated_by=payload.initiated_by,
+        s3_report_path=f"s3://{aws_storage.bucket}/{payload.s3_key}",
+    )
+
+    return {
+        "project": project.name,
+        "scan_id": scan_id,
+        "tool_type": tool_type.value,
+        "s3_key": payload.s3_key,
+        "vulnerability_count": len(vulnerabilities),
+    }
+
+
+@app.get("/api/aws/presigned-url")
+def get_presigned_url(request: Request, key: str, db: Session = Depends(get_db)):
+    _get_session_user(request, db)
+    if not aws_storage.is_configured():
+        raise HTTPException(status_code=400, detail="AWS_S3_REPORT_BUCKET 설정이 필요합니다.")
+    url = aws_storage.get_presigned_download_url(key)
+    return {"key": key, "url": url, "expires_in": 600}
 
 
 @app.post("/api/policies")
@@ -406,6 +543,7 @@ def create_policy(payload: PolicyCreateRequest, request: Request, db: Session = 
 
     policy = Policy(name=payload.name, rule_expression=payload.rule_expression, priority_result=payload.priority_result, sla_days=payload.sla_days, is_active=True)
     db.add(policy)
+
     write_audit_log(db, actor=current_user.username, action="CREATE_POLICY", target_type="policy", target_id=payload.name, details={"sla_days": payload.sla_days, "priority": payload.priority_result.value})
 
     db.commit()

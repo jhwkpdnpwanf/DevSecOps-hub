@@ -12,7 +12,7 @@ OIDC Provider는 계정 공용 리소스라 중복 생성이 불가능합니다.
 - 애플리케이션 런타임 IAM Role + S3 접근 정책
 - GitHub Actions OIDC Provider + Assume Role + S3 접근 정책
 
-## 사용 방법
+## 사용 방법 (예시 수정필요)
 ```bash
 cd terraform
 terraform init

@@ -20,6 +20,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
 
   db:
     image: mysql:8.0
@@ -30,8 +32,14 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-devsecops_hub}
     ports:
       - "3307:3306"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - mysql_data:/var/lib/mysql
+    tmpfs:
+      - /tmp
+      - /var/run/mysqld
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
@@ -43,6 +51,14 @@ services:
     container_name: redis-cache
     ports:
       - "6379:6379"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - redis_data:/data
+    tmpfs:
+      - /tmp
 
 volumes:
   mysql_data:
+  redis_data:

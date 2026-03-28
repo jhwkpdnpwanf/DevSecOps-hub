@@ -6,6 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from markdown_it import MarkdownIt
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
@@ -526,30 +527,42 @@ def ingest_from_s3_for_ci(
     if not aws_storage.is_configured():
         raise HTTPException(status_code=400, detail="AWS_S3_REPORT_BUCKET 설정이 필요합니다.")
 
-    project = _ensure_project_with_token(db, payload.project_name)
-    _validate_project_token(project, x_project_token)
+    try:
+        project = _ensure_project_with_token(db, payload.project_name)
+        _validate_project_token(project, x_project_token)
 
-    report = aws_storage.read_report_json(payload.s3_key)
-    tool_type = _resolve_tool_type(payload.tool_type, payload.s3_key)
+        report = aws_storage.read_report_json(payload.s3_key)
+        tool_type = _resolve_tool_type(payload.tool_type, payload.s3_key)
+        
+        parser_map = {
+            ToolType.SAST: SemgrepParser(),
+            ToolType.SCA: PipAuditParser(),
+            ToolType.DAST: ZAPParser(),
+        }
+        parser = parser_map.get(tool_type)
+        if not parser:
+            raise HTTPException(status_code=400, detail=f"지원하지 않는 파서: {tool_type.value}")
 
-    parser_map = {
-        ToolType.SAST: SemgrepParser(),
-        ToolType.SCA: PipAuditParser(),
-        ToolType.DAST: ZAPParser(),
-    }
-    parser = parser_map.get(tool_type)
-    if not parser:
-        raise HTTPException(status_code=400, detail=f"지원하지 않는 파서: {tool_type.value}")
-
-    vulnerabilities = parser.parse(report, scan_id=0)
-    scan_id = save_scan_results(
-        db,
-        project.id,
-        tool_type,
-        vulnerabilities,
-        initiated_by=payload.initiated_by,
-        s3_report_path=f"s3://{aws_storage.bucket}/{payload.s3_key}",
-    )
+        vulnerabilities = parser.parse(report, scan_id=0)
+        scan_id = save_scan_results(
+            db,
+            project.id,
+            tool_type,
+            vulnerabilities,
+            initiated_by=payload.initiated_by,
+            s3_report_path=f"s3://{aws_storage.bucket}/{payload.s3_key}",
+        )
+    except HTTPException:
+        raise
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=f"DB 무결성 오류: {e.orig}") from e
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"S3 ingest 실패: {e}") from e
 
     return {
         "project": project.name,

@@ -123,14 +123,25 @@ def _can_operate(user: User) -> bool:
 
 
 def _ensure_project_with_token(db: Session, project_name: str):
+    configured_project_name = os.getenv("DEVSECOPS_PROJECT_NAME")
+    configured_project_token = os.getenv("DEVSECOPS_PROJECT_TOKEN")
+    bootstrap_token = (
+        configured_project_token
+        if configured_project_name and configured_project_token and configured_project_name == project_name
+        else None
+    )
+
     project = db.query(Project).filter(Project.name == project_name).first()
     if not project:
-        project = Project(name=project_name, api_token=f"token-{project_name}")
+        project = Project(name=project_name, api_token=bootstrap_token or f"token-{project_name}")
         db.add(project)
         db.commit()
         db.refresh(project)
+    elif bootstrap_token and project.api_token != bootstrap_token:
+        project.api_token = bootstrap_token
+        db.commit()
+        db.refresh(project)
     return project
-
 
 def _validate_project_token(project: Project, provided_token: str | None):
     if provided_token and provided_token != project.api_token:

@@ -63,7 +63,7 @@ jobs:
 
       - name: Trigger Hub Import (Semgrep)
         run: |
-          curl -sS -X POST "${HUB_URL}/api/aws/import-report" \
+          curl -sS -X POST "${HUB_URL}/api/ingest-from-s3"
             -H "Content-Type: application/json" \
             -H "X-Project-Token: ${PROJECT_TOKEN}" \
             -d '{
@@ -75,7 +75,7 @@ jobs:
 
       - name: Trigger Hub Import (pip-audit)
         run: |
-          curl -sS -X POST "${HUB_URL}/api/aws/import-report" \
+          curl -sS -X POST "${HUB_URL}/api/ingest-from-s3"
             -H "Content-Type: application/json" \
             -H "X-Project-Token: ${PROJECT_TOKEN}" \
             -d '{

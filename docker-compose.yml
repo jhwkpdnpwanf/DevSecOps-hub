@@ -16,7 +16,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       AWS_REGION: ${AWS_REGION:-}
       AWS_S3_REPORT_BUCKET: ${AWS_S3_REPORT_BUCKET:-}
-      AWS_S3_PREFIX_ROOT: ${AWS_S3_PREFIX_ROOT:-devsecops-hub}
+      AWS_S3_PREFIX_ROOT: ${AWS_S3_PREFIX_ROOT:-reports}
     depends_on:
       db:
         condition: service_healthy

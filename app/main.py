@@ -48,7 +48,7 @@ def healthz():
 
 class IngestRequest(BaseModel):
     project_name: str
-    tool_type: ToolType
+    tool_type: str | ToolType | None = None
     report: dict
     initiated_by: str = "ci-pipeline"
     branch: str | None = None
@@ -146,6 +146,30 @@ def _ensure_project_with_token(db: Session, project_name: str):
 def _validate_project_token(project: Project, provided_token: str | None):
     if provided_token and provided_token != project.api_token:
         raise HTTPException(status_code=401, detail="프로젝트 API Token이 유효하지 않습니다.")
+    
+
+def _resolve_tool_type(tool_type_raw: str | ToolType | None, s3_key: str) -> ToolType:
+    if isinstance(tool_type_raw, ToolType):
+        return tool_type_raw
+
+    if isinstance(tool_type_raw, str) and tool_type_raw.strip():
+        normalized = tool_type_raw.strip().lower()
+        alias_map = {
+            "sast": ToolType.SAST,
+            "semgrep": ToolType.SAST,
+            "dast": ToolType.DAST,
+            "zap": ToolType.DAST,
+            "sca": ToolType.SCA,
+            "pip-audit": ToolType.SCA,
+            "pipaudit": ToolType.SCA,
+        }
+        resolved = alias_map.get(normalized)
+        if not resolved:
+            supported = ", ".join(sorted(alias_map.keys()))
+            raise HTTPException(status_code=400, detail=f"지원하지 않는 tool_type: {tool_type_raw}. 지원값: {supported}")
+        return resolved
+
+    return aws_storage._guess_tool_type_from_key(s3_key)
 
 
 @app.get("/auth/login", response_class=HTMLResponse)
@@ -454,7 +478,7 @@ def import_aws_report(payload: S3ImportRequest, request: Request, db: Session = 
     project = _ensure_project_with_token(db, payload.project_name)
     report = aws_storage.read_report_json(payload.s3_key)
 
-    tool_type = payload.tool_type or aws_storage._guess_tool_type_from_key(payload.s3_key)
+    tool_type = _resolve_tool_type(payload.tool_type, payload.s3_key)
     parser_map = {
         ToolType.SAST: SemgrepParser(),
         ToolType.SCA: PipAuditParser(),
@@ -506,7 +530,7 @@ def ingest_from_s3_for_ci(
     _validate_project_token(project, x_project_token)
 
     report = aws_storage.read_report_json(payload.s3_key)
-    tool_type = payload.tool_type or aws_storage._guess_tool_type_from_key(payload.s3_key)
+    tool_type = _resolve_tool_type(payload.tool_type, payload.s3_key)
 
     parser_map = {
         ToolType.SAST: SemgrepParser(),

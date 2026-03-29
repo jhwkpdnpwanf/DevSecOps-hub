@@ -11,6 +11,7 @@ permissions:
   contents: read
   actions: write
   checks: write
+  issues: write
 
 jobs:
   security-pipeline:
@@ -67,7 +68,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           target: ${{ env.DAST_TARGET_URL }}
-          artifact_name: 'zap-scan-results' 
+          artifact_name: 'zapreports'
           fail_action: false
           allow_issue_writing: false
           cmd_options: '-z "-config connection.timeoutInSecs=60"'
@@ -85,8 +86,6 @@ jobs:
           
           if [ -f "report_json.json" ]; then
             aws s3 cp report_json.json "s3://${S3_BUCKET}/${DAST_KEY}"
-          else
-            echo "ZAP report not found, but continuing..."
           fi
 
           echo "sast_key=${SAST_KEY}" >> "$GITHUB_OUTPUT"

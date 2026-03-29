@@ -10,8 +10,6 @@ permissions:
   id-token: write
   contents: read
   actions: write
-  checks: write
-  issues: write
 
 jobs:
   security-pipeline:
@@ -60,18 +58,13 @@ jobs:
           done
           exit 1
 
-      - name: Prepare ZAP workspace
-        run: sudo chmod -R 777 .
-
-      - name: ZAP Baseline Scan
-        uses: zaproxy/action-baseline@v0.12.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          target: ${{ env.DAST_TARGET_URL }}
-          artifact_name: 'zapreports'
-          fail_action: false
-          allow_issue_writing: false
-          cmd_options: '-z "-config connection.timeoutInSecs=60"'
+      - name: ZAP DAST Scan (Manual Run)
+        run: |
+          chmod -R 777 .
+          docker run --rm -v $(pwd):/zap/wrk/:rw --network=host -t ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
+            -t ${{ env.DAST_TARGET_URL }} \
+            -J report_json.json \
+            -z "-config connection.timeoutInSecs=60" || true
 
       - name: Upload reports to S3
         id: upload
@@ -80,7 +73,7 @@ jobs:
           SAST_KEY="reports/${PROJECT_NAME}/sast/${RUN_ID}/semgrep.json"
           SCA_KEY="reports/${PROJECT_NAME}/sca/${RUN_ID}/pip-audit.json"
           DAST_KEY="reports/${PROJECT_NAME}/dast/${RUN_ID}/zap_report.json"
-
+          
           aws s3 cp semgrep_report.json "s3://${S3_BUCKET}/${SAST_KEY}"
           aws s3 cp pip_audit_report.json "s3://${S3_BUCKET}/${SCA_KEY}"
           

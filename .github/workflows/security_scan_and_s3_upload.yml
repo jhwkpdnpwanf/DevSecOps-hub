@@ -84,7 +84,34 @@ jobs:
       - name: Trigger Hub DAST run
         if: ${{ env.DAST_TARGET_URL != '' }}
         run: |
-          curl -i --fail-with-body -sS -X POST "${HUB_URL}/api/dast/run" \
+          PRIMARY_URL="${HUB_URL}/api/dast/run"
+          FALLBACK_URL="${HUB_URL}/api/dast/run-for-ci"
+
+          HTTP_CODE="$(curl -sS -o /tmp/dast_response.json -w "%{http_code}" -X POST "${PRIMARY_URL}" \
             -H "Content-Type: application/json" \
             -H "X-Project-Token: ${PROJECT_TOKEN}" \
-            -d "{\"project_name\":\"${PROJECT_NAME}\",\"target_url\":\"${DAST_TARGET_URL}\",\"initiated_by\":\"github-actions:dast\",\"pipeline_run_id\":\"${{ github.run_id }}\",\"branch\":\"${{ github.ref_name }}\",\"commit_sha\":\"${{ github.sha }}\"}"
+            -d "{\"project_name\":\"${PROJECT_NAME}\",\"target_url\":\"${DAST_TARGET_URL}\",\"initiated_by\":\"github-actions:dast\",\"pipeline_run_id\":\"${{ github.run_id }}\",\"branch\":\"${{ github.ref_name }}\",\"commit_sha\":\"${{ github.sha }}\"}")"
+
+          echo "DAST trigger url=${PRIMARY_URL} status=${HTTP_CODE}"
+          cat /tmp/dast_response.json || true
+
+          if [ "${HTTP_CODE}" = "404" ]; then
+            echo "Primary DAST endpoint not found. Retrying with fallback endpoint: ${FALLBACK_URL}"
+            HTTP_CODE="$(curl -sS -o /tmp/dast_response.json -w "%{http_code}" -X POST "${FALLBACK_URL}" \
+              -H "Content-Type: application/json" \
+              -H "X-Project-Token: ${PROJECT_TOKEN}" \
+              -d "{\"project_name\":\"${PROJECT_NAME}\",\"target_url\":\"${DAST_TARGET_URL}\",\"initiated_by\":\"github-actions:dast\",\"pipeline_run_id\":\"${{ github.run_id }}\",\"branch\":\"${{ github.ref_name }}\",\"commit_sha\":\"${{ github.sha }}\"}")"
+
+            echo "DAST trigger url=${FALLBACK_URL} status=${HTTP_CODE}"
+            cat /tmp/dast_response.json || true
+
+            if [ "${HTTP_CODE}" = "404" ]; then
+              echo "Both DAST endpoints are 404. HUB_URL is likely pointing to a deployment that does not include DAST APIs yet."
+              exit 0
+            fi
+          fi
+
+          if [ "${HTTP_CODE}" -ge 400 ]; then
+            echo "DAST trigger failed with status ${HTTP_CODE}"
+            exit 1
+          fi

@@ -70,7 +70,7 @@ jobs:
           artifact_name: 'zap-scan-results' 
           fail_action: false
           allow_issue_writing: false
-          cmd_options: '-z -config connection.timeoutInSecs=60'
+          cmd_options: '-z "-config connection.timeoutInSecs=60"'
 
       - name: Upload reports to S3
         id: upload

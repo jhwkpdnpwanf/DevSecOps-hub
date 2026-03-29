@@ -46,6 +46,21 @@ jobs:
       - name: Run pip-audit
         run: pip-audit -r requirements.txt --format json > pip_audit_report.json || true
 
+      - name: Wait for Target to be Ready
+        run: |
+          echo "[*] Target URL: ${{ env.DAST_TARGET_URL }}"
+          for i in {1..18}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" ${{ env.DAST_TARGET_URL }}/healthz || echo "failed")
+            if [ "$STATUS" -eq 200 ]; then
+              echo "[+] Server is UP and responding with 200 OK."
+              exit 0
+            fi
+            echo "[-] Attempt $i: Server is not ready (Status: $STATUS). Waiting 10s..."
+            sleep 10
+          done
+          echo "::error::Server did not become ready within 3 minutes."
+          exit 1
+
       - name: Prepare ZAP workspace
         run: sudo chmod -R 777 .
 
@@ -57,6 +72,7 @@ jobs:
           artifact_name: 'zap-scan-results' 
           fail_action: false
           allow_issue_writing: false
+          cmd_options: "-z '-config connection.timeoutInSecs=60'"
 
       - name: Upload reports to S3
         id: upload

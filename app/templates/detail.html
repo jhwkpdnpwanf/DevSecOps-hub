@@ -21,7 +21,7 @@
 
     .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
     .item { border:1px solid #e5e7eb; border-radius:8px; padding:10px; background:#fff; }
-
+    .desc { margin-top:10px; color:#374151; line-height:1.45; white-space:pre-wrap; word-break:break-word; }
     .sev-badge { padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; }
     .sev-badge-critical, .sev-badge-high { background:#fee2e2; color:#991b1b; }
     .sev-badge-medium { background:#fef3c7; color:#92400e; }
@@ -56,6 +56,7 @@
             · {{ vuln.priority.value }} · {{ vuln.status.value }} · {{ vuln.scan.tool_type.value }}
           </p>
           <p style="margin:8px 0 0 0; color:#4b5563;">프로젝트: {{ vuln.scan.project.name }}</p>
+          <p class="desc">{{ vuln.description or '상세 설명이 없습니다.' }}</p>
         </div>
       </div>
 

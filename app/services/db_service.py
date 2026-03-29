@@ -3,6 +3,8 @@ from typing import Iterable
 
 from sqlalchemy.orm import Session
 
+from app.database.models import Project, Scan, ToolType, Vulnerability, VulnerabilityStatusHistory, VulnStatus
+
 from app.database.models import Project, Scan, ToolType, Vulnerability, VulnerabilityStatusHistory
 from app.services.audit_service import write_audit_log
 from app.services.policy_service import PolicyEngine
@@ -66,7 +68,19 @@ def save_scan_results(
     db.flush()
 
     count = 0
+    deduplicated = 0
     for vulnerability in vulnerabilities:
+        existing = (
+            db.query(Vulnerability)
+            .join(Vulnerability.scan)
+            .filter(Scan.project_id == project_id, Vulnerability.vulnerability_key == vulnerability.vulnerability_key)
+            .filter(Vulnerability.status != VulnStatus.CLOSED)
+            .order_by(Vulnerability.updated_at.desc())
+            .first()
+        )
+        if existing:
+            deduplicated += 1
+            continue
         vulnerability.scan_id = new_scan.id
         _apply_policy(vulnerability, project)
         db.add(vulnerability)
@@ -92,6 +106,7 @@ def save_scan_results(
         details={
             "tool_type": new_scan.tool_type.value,
             "vulnerability_count": count,
+            "deduplicated_count": deduplicated,
             "project_id": project_id,
         },
     )

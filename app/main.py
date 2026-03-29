@@ -13,6 +13,8 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.database.models import (
     AIAnalysis,
+    Integration,
+    IntegrationType,
     Policy,
     Priority,
     Project,
@@ -34,6 +36,7 @@ from app.services.audit_service import write_audit_log
 from app.services.db_service import save_scan_results
 from app.services.policy_service import PolicyEngine
 from app.services.aws_storage_service import AWSStorageService
+from app.services.integration_service import notify_integrations
 
 init_db()
 app = FastAPI(title="DevSecOps-hub API")
@@ -81,6 +84,12 @@ class MockLoginRequest(BaseModel):
     email: str
 
 
+class IntegrationRequest(BaseModel):
+    integration_type: IntegrationType
+    config_name: str
+    enabled: bool = True
+    webhook_url: str
+
 
 class S3ImportRequest(BaseModel):
     project_name: str
@@ -109,6 +118,39 @@ def _get_session_user(request: Request, db: Session) -> User:
         request.session.clear()
         raise HTTPException(status_code=401, detail="세션이 유효하지 않습니다.")
     return user
+
+
+def _request_meta(request: Request):
+    forwarded = request.headers.get("x-forwarded-for")
+    source_ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
+    return {
+        "source_ip": source_ip,
+        "path": str(request.url.path),
+        "user_agent": request.headers.get("user-agent", "-"),
+    }
+
+def _sync_projects_from_s3(db: Session):
+    if not aws_storage.is_configured():
+        return
+
+    try:
+        discovered = aws_storage.discover_project_names()
+    except Exception:
+        return
+
+    if not discovered:
+        return
+
+    existing = {name for (name,) in db.query(Project.name).all()}
+    created = False
+    for name in discovered:
+        if name not in existing:
+            db.add(Project(name=name, api_token=f"token-{name}"))
+            created = True
+
+    if created:
+        db.commit()
+
 
 
 def _authorize_project(user: User, project: Project) -> bool:
@@ -190,11 +232,31 @@ def mock_login(payload: MockLoginRequest, request: Request, db: Session = Depend
         db.refresh(user)
 
     request.session["user_id"] = user.id
+    write_audit_log(
+        db,
+        actor=user.username,
+        action="LOGIN",
+        target_type="user",
+        target_id=str(user.id),
+        details={"email": user.email, **_request_meta(request)},
+    )
+    db.commit()
     return {"message": "로그인 완료", "user": user.username, "role": user.role.value}
 
 
 @app.post("/auth/logout")
-def logout(request: Request):
+
+def logout(request: Request, db: Session = Depends(get_db)):
+    actor = request.session.get("user_id", "anonymous")
+    write_audit_log(
+        db,
+        actor=str(actor),
+        action="LOGOUT",
+        target_type="user",
+        target_id=str(actor),
+        details=_request_meta(request),
+    )
+    db.commit()
     request.session.clear()
     return {"message": "로그아웃 완료"}
 
@@ -209,6 +271,18 @@ def dashboard(
         current_user = _get_session_user(request, db)
     except HTTPException:
         return RedirectResponse(url="/auth/login", status_code=302)
+    
+    write_audit_log(
+        db,
+        actor=current_user.username,
+        action="READ_DASHBOARD",
+        target_type="dashboard",
+        target_id=str(project_id or "all"),
+        details=_request_meta(request),
+    )
+    db.commit()
+
+    _sync_projects_from_s3(db)
 
     projects = db.query(Project).order_by(Project.name.asc()).all()
     selected_project = None
@@ -274,8 +348,19 @@ def dashboard(
 
 @app.get("/api/projects")
 def list_projects(request: Request, db: Session = Depends(get_db)):
-    _get_session_user(request, db)
-    return [{"id": p.id, "name": p.name, "owner_team": p.owner_team} for p in db.query(Project).order_by(Project.name.asc()).all()]
+    current_user = _get_session_user(request, db)
+    _sync_projects_from_s3(db)
+    projects = db.query(Project).order_by(Project.name.asc()).all()
+    write_audit_log(
+        db,
+        actor=current_user.username,
+        action="READ_PROJECTS",
+        target_type="project",
+        target_id="list",
+        details={**_request_meta(request), "count": len(projects)},
+    )
+    db.commit()
+    return [{"id": p.id, "name": p.name, "owner_team": p.owner_team} for p in projects]
 
 
 @app.post("/api/ingest")
@@ -389,6 +474,17 @@ def update_vulnerability_status(vuln_id: int, payload: StatusUpdateRequest, requ
 
     write_audit_log(db, actor=payload.changed_by, action="UPDATE_STATUS", target_type="vulnerability", target_id=str(vuln.id), details={"from": previous.value if previous else None, "to": payload.status.value})
 
+    notify_integrations(
+        db,
+        "vulnerability_status_updated",
+        {
+            "actor": payload.changed_by,
+            "vulnerability_id": vuln.id,
+            "from_status": previous.value if previous else None,
+            "to_status": payload.status.value,
+        },
+    )
+
     db.commit()
     return {"id": vuln.id, "from": previous.value, "to": vuln.status.value}
 
@@ -418,7 +514,16 @@ def assign_vulnerability(vuln_id: int, payload: AssignmentRequest, request: Requ
         db.add(VulnerabilityStatusHistory(vulnerability_id=vuln.id, from_status=previous.value, to_status=VulnStatus.IN_PROGRESS.value, changed_by=payload.changed_by, comment=f"{assignee.username} 할당으로 자동 진행 상태 전환"))
 
     write_audit_log(db, actor=payload.changed_by, action="ASSIGN_VULNERABILITY", target_type="vulnerability", target_id=str(vuln.id), details={"assignee": assignee.username, "notification": "in-app assignment created"})
-
+    notify_integrations(
+        db,
+        "vulnerability_assigned",
+        {
+            "actor": payload.changed_by,
+            "vulnerability_id": vuln.id,
+            "assignee": assignee.username,
+            "new_status": vuln.status.value,
+        },
+    )
     db.commit()
     return {"vulnerability_id": vuln.id, "assignee": assignee.username, "new_status": vuln.status.value}
 
@@ -452,12 +557,24 @@ def list_aws_reports(
     project_name: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    _get_session_user(request, db)
+    
+    current_user = _get_session_user(request, db)
     if not aws_storage.is_configured():
         raise HTTPException(status_code=400, detail="AWS_S3_REPORT_BUCKET 설정이 필요합니다.")
 
     try:
         reports = aws_storage.list_reports(project_name)
+
+        write_audit_log(
+            db,
+            actor=current_user.username,
+            action="READ_S3_REPORT_LIST",
+            target_type="s3_bucket",
+            target_id=aws_storage.bucket or "-",
+            details={**_request_meta(request), "project": project_name, "count": len(reports)},
+        )
+        db.commit()
+
         return {
             "bucket": aws_storage.bucket,
             "project": project_name,
@@ -506,6 +623,17 @@ def import_aws_report(payload: S3ImportRequest, request: Request, db: Session = 
         target_type="scan",
         target_id=str(scan_id),
         details={"s3_key": payload.s3_key, "tool_type": tool_type.value},
+    )
+    notify_integrations(
+        db,
+        "s3_report_imported",
+        {
+            "actor": current_user.username,
+            "project": project.name,
+            "scan_id": scan_id,
+            "s3_key": payload.s3_key,
+            "tool_type": tool_type.value,
+        },
     )
     db.commit()
 
@@ -575,10 +703,21 @@ def ingest_from_s3_for_ci(
 
 @app.get("/api/aws/presigned-url")
 def get_presigned_url(request: Request, key: str, db: Session = Depends(get_db)):
+    current_user = _get_session_user(request, db)
     _get_session_user(request, db)
     if not aws_storage.is_configured():
         raise HTTPException(status_code=400, detail="AWS_S3_REPORT_BUCKET 설정이 필요합니다.")
     url = aws_storage.get_presigned_download_url(key)
+
+    write_audit_log(
+        db,
+        actor=current_user.username,
+        action="GENERATE_PRESIGNED_URL",
+        target_type="s3_object",
+        target_id=key,
+        details=_request_meta(request),
+    )
+    db.commit()
     return {"key": key, "url": url, "expires_in": 600}
 
 
@@ -596,12 +735,87 @@ def create_policy(payload: PolicyCreateRequest, request: Request, db: Session = 
     db.add(policy)
 
     write_audit_log(db, actor=current_user.username, action="CREATE_POLICY", target_type="policy", target_id=payload.name, details={"sla_days": payload.sla_days, "priority": payload.priority_result.value})
-
+    notify_integrations(
+        db,
+        "policy_created",
+        {
+            "actor": current_user.username,
+            "policy_name": payload.name,
+            "priority": payload.priority_result.value,
+            "sla_days": payload.sla_days,
+        },
+    )
     db.commit()
     return {"name": policy.name, "priority": policy.priority_result.value, "sla_days": policy.sla_days}
 
 
 @app.get("/api/policies")
 def list_policies(request: Request, db: Session = Depends(get_db)):
-    _get_session_user(request, db)
-    return [{"id": p.id, "name": p.name, "rule_expression": p.rule_expression, "priority_result": p.priority_result.value, "sla_days": p.sla_days, "is_active": p.is_active} for p in db.query(Policy).order_by(Policy.created_at.desc()).all()]
+    current_user = _get_session_user(request, db)
+    policies = db.query(Policy).order_by(Policy.created_at.desc()).all()
+    write_audit_log(
+        db,
+        actor=current_user.username,
+        action="READ_POLICIES",
+        target_type="policy",
+        target_id="list",
+        details={**_request_meta(request), "count": len(policies)},
+    )
+    db.commit()
+    return [{"id": p.id, "name": p.name, "rule_expression": p.rule_expression, "priority_result": p.priority_result.value, "sla_days": p.sla_days, "is_active": p.is_active} for p in policies]
+
+
+@app.get("/api/integrations")
+def list_integrations(request: Request, db: Session = Depends(get_db)):
+    current_user = _get_session_user(request, db)
+    if current_user.role not in {UserRole.ADMIN, UserRole.SECURITY_ANALYST}:
+        raise HTTPException(status_code=403, detail="연동 조회 권한이 없습니다.")
+
+    integrations = db.query(Integration).order_by(Integration.created_at.desc()).all()
+    return [
+        {
+            "id": i.id,
+            "integration_type": i.integration_type.value,
+            "config_name": i.config_name,
+            "enabled": i.enabled,
+            "masked_config": {"webhook_url": "***"} if (i.masked_config or {}).get("webhook_url") else {},
+        }
+        for i in integrations
+    ]
+
+
+@app.post("/api/integrations")
+def create_or_update_integration(payload: IntegrationRequest, request: Request, db: Session = Depends(get_db)):
+    current_user = _get_session_user(request, db)
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="연동 설정은 Admin만 가능합니다.")
+
+    integration = (
+        db.query(Integration)
+        .filter(Integration.integration_type == payload.integration_type, Integration.config_name == payload.config_name)
+        .first()
+    )
+    if integration:
+        integration.enabled = payload.enabled
+        integration.masked_config = {"webhook_url": payload.webhook_url}
+        action = "UPDATE_INTEGRATION"
+    else:
+        integration = Integration(
+            integration_type=payload.integration_type,
+            config_name=payload.config_name,
+            enabled=payload.enabled,
+            masked_config={"webhook_url": payload.webhook_url},
+        )
+        db.add(integration)
+        action = "CREATE_INTEGRATION"
+
+    write_audit_log(
+        db,
+        actor=current_user.username,
+        action=action,
+        target_type="integration",
+        target_id=f"{payload.integration_type.value}:{payload.config_name}",
+        details={**_request_meta(request), "enabled": payload.enabled},
+    )
+    db.commit()
+    return {"message": "integration saved", "type": payload.integration_type.value, "config_name": payload.config_name, "enabled": payload.enabled}

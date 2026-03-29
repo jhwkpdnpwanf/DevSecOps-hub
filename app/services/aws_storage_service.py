@@ -55,6 +55,44 @@ class AWSStorageService:
 
         return results
 
+    def discover_project_names(self) -> list[str]:
+        """
+        Discover project candidates from S3 report object keys.
+        Key pattern expectation:
+          - <prefix_root>/<project>/<tool>/...json
+          - <project>/<tool>/...json
+        """
+        if not self.bucket:
+            raise ValueError("AWS_S3_REPORT_BUCKET 환경변수가 설정되지 않았습니다.")
+
+        projects: set[str] = set()
+        normalized_root = self.prefix_root.strip("/")
+        root_prefix = f"{normalized_root}/" if normalized_root else ""
+
+        for report in self.list_reports(project=None):
+            key = report.key
+            relative = key
+            if root_prefix and key.startswith(root_prefix):
+                relative = key[len(root_prefix):]
+
+            if "/" not in relative:
+                continue
+
+            candidate = relative.split("/", 1)[0].strip()
+            if candidate:
+                projects.add(candidate)
+
+        if not projects and not normalized_root:
+            bucket_name = self.bucket.strip()
+            for suffix in ("-reports", "_reports"):
+                if bucket_name.endswith(suffix):
+                    bucket_name = bucket_name[: -len(suffix)]
+                    break
+            if bucket_name:
+                projects.add(bucket_name)
+
+        return sorted(projects)
+    
     def read_report_json(self, key: str) -> dict:
         if not self.bucket:
             raise ValueError("AWS_S3_REPORT_BUCKET 환경변수가 설정되지 않았습니다.")

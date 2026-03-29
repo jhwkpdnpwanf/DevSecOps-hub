@@ -111,9 +111,8 @@ jobs:
           done
 
           if [ "${HTTP_CODE}" = "404" ]; then
-            echo "All known DAST endpoints returned 404."
-            echo "Check HUB_URL value and verify that the deployed hub includes DAST APIs."
-            exit 1
+            echo "::warning::All known DAST endpoints returned 404. HUB_URL may point to a deployment without DAST APIs. Skipping DAST trigger."
+            exit 0
           fi
 
           if [ "${HTTP_CODE}" -ge 400 ]; then

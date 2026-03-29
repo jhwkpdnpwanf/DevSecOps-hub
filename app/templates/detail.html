@@ -56,11 +56,12 @@
             · {{ vuln.priority.value }} · {{ vuln.status.value }} · {{ vuln.scan.tool_type.value }}
           </p>
           <p style="margin:8px 0 0 0; color:#4b5563;">프로젝트: {{ vuln.scan.project.name }}</p>
-          <p style="margin:12px 0 4px 0; font-weight:700;">Description</p>
-          <p class="desc">{{ vuln.description or '상세 설명이 없습니다.' }}</p>
         </div>
       </div>
-
+      <div class="panel panel-body">
+        <h2 style="margin-top:0;">취약점 설명</h2>
+        <p class="desc" style="margin-top:0;">{{ vuln.description or '상세 설명이 없습니다.' }}</p>
+      </div>
       <div class="panel panel-body">
         <div class="grid">
           <div class="item"><strong>Severity</strong><br/>{{ vuln.severity.value }}</div>

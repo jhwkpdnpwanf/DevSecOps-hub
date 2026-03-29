@@ -577,7 +577,7 @@ def list_aws_reports(
 
     try:
         reports = aws_storage.list_reports(project_name)
-
+        reports.sort(key=lambda x: x.last_modified, reverse=True)
         try:
             write_audit_log(
                 db,
@@ -727,6 +727,9 @@ def ingest_from_s3_for_ci(
     }
 
 @app.post("/api/dast/run")
+@app.post("/api/dast/run-for-ci")
+@app.post("/dast/run")
+@app.post("/dast/run-for-ci")
 def run_dast_scan(
     payload: DASTRunRequest,
     request: Request,

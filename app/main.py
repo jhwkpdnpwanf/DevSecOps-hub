@@ -196,7 +196,9 @@ def _ensure_project_with_token(db: Session, project_name: str):
     return project
 
 def _validate_project_token(project: Project, provided_token: str | None):
-    if provided_token and provided_token != project.api_token:
+    if not provided_token:
+        raise HTTPException(status_code=401, detail="프로젝트 API Token이 필요합니다.")
+    if provided_token != project.api_token:
         raise HTTPException(status_code=401, detail="프로젝트 API Token이 유효하지 않습니다.")
     
 

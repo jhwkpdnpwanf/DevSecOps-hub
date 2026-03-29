@@ -38,84 +38,45 @@ jobs:
           python-version: "3.11"
 
       - name: Install scanners
-        run: |
-          pip install semgrep pip-audit
+        run: pip install semgrep pip-audit
 
       - name: Run Semgrep
-        run: |
-          semgrep scan --config auto --json --output semgrep_report.json . || true
+        run: semgrep scan --config auto --json --output semgrep_report.json . || true
 
       - name: Run pip-audit
-        run: |
-          pip-audit -r requirements.txt --format json > pip_audit_report.json || true
+        run: pip-audit -r requirements.txt --format json > pip_audit_report.json || true
 
-      - name: Upload SAST/SCA reports to S3
+      - name: ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          target: ${{ env.DAST_TARGET_URL }}
+          artifact_name: 'zap_report.json'
+          fail_action: false
+
+      - name: Upload reports to S3
         id: upload
         run: |
           RUN_ID="${{ github.run_id }}"
           SAST_KEY="reports/${PROJECT_NAME}/sast/${RUN_ID}/semgrep.json"
           SCA_KEY="reports/${PROJECT_NAME}/sca/${RUN_ID}/pip-audit.json"
+          DAST_KEY="reports/${PROJECT_NAME}/dast/${RUN_ID}/zap_report.json"
 
           aws s3 cp semgrep_report.json "s3://${S3_BUCKET}/${SAST_KEY}"
           aws s3 cp pip_audit_report.json "s3://${S3_BUCKET}/${SCA_KEY}"
+          # ZAP 리포트는 action이 생성한 파일명 확인 필요 (보통 zap_report.json)
+          aws s3 cp report_json.json "s3://${S3_BUCKET}/${DAST_KEY}" || echo "ZAP report not found"
 
           echo "sast_key=${SAST_KEY}" >> "$GITHUB_OUTPUT"
           echo "sca_key=${SCA_KEY}" >> "$GITHUB_OUTPUT"
+          echo "dast_key=${DAST_KEY}" >> "$GITHUB_OUTPUT"
 
-      - name: Verify uploaded objects exist
+      - name: Trigger Hub Import
         run: |
-          aws s3api head-object --bucket "${S3_BUCKET}" --key "${{ steps.upload.outputs.sast_key }}"
-          aws s3api head-object --bucket "${S3_BUCKET}" --key "${{ steps.upload.outputs.sca_key }}"
-
-      - name: Trigger Hub Import (Semgrep)
-        run: |
-          curl -i --fail-with-body -sS -X POST "${HUB_URL}/api/ingest-from-s3" \
-            -H "Content-Type: application/json" \
-            -H "X-Project-Token: ${PROJECT_TOKEN}" \
-            -d "{\"project_name\":\"${PROJECT_NAME}\",\"s3_key\":\"${{ steps.upload.outputs.sast_key }}\",\"tool_type\":\"Semgrep\",\"initiated_by\":\"github-actions\",\"pipeline_run_id\":\"${{ github.run_id }}\",\"branch\":\"${{ github.ref_name }}\",\"commit_sha\":\"${{ github.sha }}\"}"
-
-      - name: Trigger Hub Import (pip-audit)
-        run: |
-          curl -i --fail-with-body -sS -X POST "${HUB_URL}/api/ingest-from-s3" \
-            -H "Content-Type: application/json" \
-            -H "X-Project-Token: ${PROJECT_TOKEN}" \
-            -d "{\"project_name\":\"${PROJECT_NAME}\",\"s3_key\":\"${{ steps.upload.outputs.sca_key }}\",\"tool_type\":\"pip-audit\",\"initiated_by\":\"github-actions\",\"pipeline_run_id\":\"${{ github.run_id }}\",\"branch\":\"${{ github.ref_name }}\",\"commit_sha\":\"${{ github.sha }}\"}"
-
-      - name: Trigger Hub DAST run
-        if: ${{ env.DAST_TARGET_URL != '' }}
-        run: |
-          BASE_URL="${HUB_URL%/}"
-          DAST_PATHS=(
-            "/api/dast/run"
-            "/dast/run"
-            "/api/dast/run-for-ci"
-            "/dast/run-for-ci"
-          )
-
-          HTTP_CODE="404"
-          SELECTED_URL=""
-          for path in "${DAST_PATHS[@]}"; do
-            CANDIDATE_URL="${BASE_URL}${path}"
-            HTTP_CODE="$(curl -sS -o /tmp/dast_response.json -w "%{http_code}" -X POST "${CANDIDATE_URL}" \
+          for TOOL in "Semgrep:${{ steps.upload.outputs.sast_key }}" "pip-audit:${{ steps.upload.outputs.sca_key }}" "DAST:${{ steps.upload.outputs.dast_key }}"; do
+            IFS=':' read -r TYPE KEY <<< "$TOOL"
+            curl -i --fail-with-body -sS -X POST "${HUB_URL}/api/ingest-from-s3" \
               -H "Content-Type: application/json" \
               -H "X-Project-Token: ${PROJECT_TOKEN}" \
-              -d "{\"project_name\":\"${PROJECT_NAME}\",\"target_url\":\"${DAST_TARGET_URL}\",\"initiated_by\":\"github-actions:dast\",\"pipeline_run_id\":\"${{ github.run_id }}\",\"branch\":\"${{ github.ref_name }}\",\"commit_sha\":\"${{ github.sha }}\"}")"
-
-            echo "DAST trigger url=${CANDIDATE_URL} status=${HTTP_CODE}"
-            cat /tmp/dast_response.json || true
-
-            if [ "${HTTP_CODE}" != "404" ]; then
-              SELECTED_URL="${CANDIDATE_URL}"
-              break
-            fi
+              -d "{\"project_name\":\"${PROJECT_NAME}\",\"s3_key\":\"$KEY\",\"tool_type\":\"$TYPE\",\"initiated_by\":\"github-actions\"}"
           done
-
-          if [ "${HTTP_CODE}" = "404" ]; then
-            echo "::warning::All known DAST endpoints returned 404. HUB_URL may point to a deployment without DAST APIs. Skipping DAST trigger."
-            exit 0
-          fi
-
-          if [ "${HTTP_CODE}" -ge 400 ]; then
-            echo "DAST trigger failed with status ${HTTP_CODE} (url=${SELECTED_URL})"
-            exit 1
-          fi

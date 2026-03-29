@@ -54,7 +54,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           target: ${{ env.DAST_TARGET_URL }}
-          artifact_name: 'zap_report.json'
+          artifact_name: 'zap-scan-results' 
           fail_action: false
           allow_issue_writing: false
 
@@ -62,7 +62,6 @@ jobs:
         id: upload
         run: |
           RUN_ID="${{ github.run_id }}"
-          
           SAST_KEY="reports/${PROJECT_NAME}/sast/${RUN_ID}/semgrep.json"
           SCA_KEY="reports/${PROJECT_NAME}/sca/${RUN_ID}/pip-audit.json"
           DAST_KEY="reports/${PROJECT_NAME}/dast/${RUN_ID}/zap_report.json"
@@ -73,7 +72,6 @@ jobs:
           if [ -f "report_json.json" ]; then
             aws s3 cp report_json.json "s3://${S3_BUCKET}/${DAST_KEY}"
           else
-            echo "::error::ZAP report_json.json not found!"
             exit 1
           fi
 
@@ -85,9 +83,6 @@ jobs:
         run: |
           for TOOL in "Semgrep:${{ steps.upload.outputs.sast_key }}" "pip-audit:${{ steps.upload.outputs.sca_key }}" "DAST:${{ steps.upload.outputs.dast_key }}"; do
             IFS=':' read -r TYPE KEY <<< "$TOOL"
-            
-            echo "[*] Ingesting $TYPE from S3 key: $KEY"
-            
             curl -i --fail-with-body -sS -X POST "${HUB_URL}/api/ingest-from-s3" \
               -H "Content-Type: application/json" \
               -H "X-Project-Token: ${PROJECT_TOKEN}" \

@@ -46,6 +46,9 @@ jobs:
       - name: Run pip-audit
         run: pip-audit -r requirements.txt --format json > pip_audit_report.json || true
 
+      - name: Prepare ZAP workspace
+        run: sudo chmod -R 777 .
+
       - name: ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.12.0
         with:

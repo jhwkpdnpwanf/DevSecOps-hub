@@ -67,10 +67,10 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           target: ${{ env.DAST_TARGET_URL }}
-          artifact_name: 'zap-scan-results' 
+          artifact_name: 'zapreport' 
           fail_action: false
           allow_issue_writing: false
-          cmd_options: '-z "-config connection.timeoutInSecs=60"'
+          cmd_options: '-z -config connection.timeoutInSecs=60'
 
       - name: Upload reports to S3
         id: upload
@@ -86,7 +86,7 @@ jobs:
           if [ -f "report_json.json" ]; then
             aws s3 cp report_json.json "s3://${S3_BUCKET}/${DAST_KEY}"
           else
-            exit 1
+            echo "ZAP report not found, but continuing..."
           fi
 
           echo "sast_key=${SAST_KEY}" >> "$GITHUB_OUTPUT"

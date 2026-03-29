@@ -22,7 +22,9 @@ class AWSStorageService:
         self.bucket = os.getenv("AWS_S3_REPORT_BUCKET")
         self.region = os.getenv("AWS_REGION", "ap-northeast-2")
         self.prefix_root = os.getenv("AWS_S3_PREFIX_ROOT", "")
-        self._s3 = boto3.client("s3", region_name=self.region)
+
+    def _s3_client(self):
+        return boto3.client("s3", region_name=self.region)
 
     def is_configured(self) -> bool:
         return bool(self.bucket)
@@ -36,23 +38,26 @@ class AWSStorageService:
             raise ValueError("AWS_S3_REPORT_BUCKET 환경변수가 설정되지 않았습니다.")
 
         prefix = self._normalize_prefix(project)
-        paginator = self._s3.get_paginator("list_objects_v2")
+        paginator = self._s3_client().get_paginator("list_objects_v2")
 
         results: list[S3ReportMeta] = []
-        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
-            for obj in page.get("Contents", []):
-                key = obj["Key"]
-                if not key.endswith(".json"):
-                    continue
-                results.append(
-                    S3ReportMeta(
-                        key=key,
-                        last_modified=obj["LastModified"].isoformat(),
-                        size=obj["Size"],
-                        tool_type=self._guess_tool_type_from_key(key).value,
-                    )
-                )
 
+        try:
+            for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+                for obj in page.get("Contents", []):
+                    key = obj["Key"]
+                    if not key.endswith(".json"):
+                        continue
+                    results.append(
+                        S3ReportMeta(
+                            key=key,
+                            last_modified=obj["LastModified"].isoformat(),
+                            size=obj["Size"],
+                            tool_type=self._guess_tool_type_from_key(key).value,
+                        )
+                    )
+        except (ClientError, BotoCoreError) as e:
+            raise RuntimeError(f"S3 목록 조회 실패(bucket={self.bucket}, prefix={prefix}): {e}") from e
         return results
 
     def discover_project_names(self) -> list[str]:
@@ -98,7 +103,7 @@ class AWSStorageService:
             raise ValueError("AWS_S3_REPORT_BUCKET 환경변수가 설정되지 않았습니다.")
 
         try:
-            resp = self._s3.get_object(Bucket=self.bucket, Key=key)
+            resp = self._s3_client().get_object(Bucket=self.bucket, Key=key)
             data = resp["Body"].read().decode("utf-8")
             return json.loads(data)
         except (ClientError, BotoCoreError) as e:
@@ -107,7 +112,7 @@ class AWSStorageService:
     def get_presigned_download_url(self, key: str, expires_in: int = 600):
         if not self.bucket:
             raise ValueError("AWS_S3_REPORT_BUCKET 환경변수가 설정되지 않았습니다.")
-        return self._s3.generate_presigned_url(
+        return self._s3_client().generate_presigned_url(
             ClientMethod="get_object",
             Params={"Bucket": self.bucket, "Key": key},
             ExpiresIn=expires_in,

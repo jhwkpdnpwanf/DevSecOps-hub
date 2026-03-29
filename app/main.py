@@ -565,15 +565,18 @@ def list_aws_reports(
     try:
         reports = aws_storage.list_reports(project_name)
 
-        write_audit_log(
-            db,
-            actor=current_user.username,
-            action="READ_S3_REPORT_LIST",
-            target_type="s3_bucket",
-            target_id=aws_storage.bucket or "-",
-            details={**_request_meta(request), "project": project_name, "count": len(reports)},
-        )
-        db.commit()
+        try:
+            write_audit_log(
+                db,
+                actor=current_user.username,
+                action="READ_S3_REPORT_LIST",
+                target_type="s3_bucket",
+                target_id=aws_storage.bucket or "-",
+                details={**_request_meta(request), "project": project_name, "count": len(reports)},
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
 
         return {
             "bucket": aws_storage.bucket,

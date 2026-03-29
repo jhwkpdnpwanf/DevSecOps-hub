@@ -53,12 +53,12 @@ class AWSStorageService:
                             key=key,
                             last_modified=obj["LastModified"].isoformat(),
                             size=obj["Size"],
-                            tool_type=self._guess_tool_type_from_key(key).value,
+                            tool_type=self._tool_type_key_from_enum(self._guess_tool_type_from_key(key)),
                         )
                     )
         except (ClientError, BotoCoreError) as e:
             raise RuntimeError(f"S3 목록 조회 실패(bucket={self.bucket}, prefix={prefix}): {e}") from e
-        return results
+        return sorted(results, key=lambda report: report.last_modified, reverse=True)
 
     def discover_project_names(self) -> list[str]:
         """
@@ -128,3 +128,12 @@ class AWSStorageService:
         if "pip" in lowered or "sca" in lowered:
             return ToolType.SCA
         return ToolType.SCA
+
+    @staticmethod
+    def _tool_type_key_from_enum(tool_type: ToolType) -> str:
+        mapping = {
+            ToolType.SAST: "sast",
+            ToolType.DAST: "dast",
+            ToolType.SCA: "sca",
+        }
+        return mapping[tool_type]

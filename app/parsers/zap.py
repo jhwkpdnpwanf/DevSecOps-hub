@@ -14,12 +14,20 @@ class ZAPParser:
         seen_keys: set[str] = set()
 
         sites = json_data.get("site", [])
+        if isinstance(sites, dict):
+            sites = [sites]
+        if not sites and isinstance(json_data.get("report"), dict):
+            report_sites = json_data.get("report", {}).get("site", [])
+            if isinstance(report_sites, dict):
+                report_sites = [report_sites]
+            sites = report_sites
         for site in sites:
             for alert in site.get("alerts", []):
                 risk = str(alert.get("risk", "medium")).lower()
                 severity = self.RISK_MAP.get(risk, Severity.MEDIUM)
                 plugin_id = alert.get("pluginid", "unknown-plugin")
                 name = alert.get("name", "ZAP Alert")
+                description = alert.get("description") or alert.get("desc")
 
                 for instance in alert.get("instances", []) or [{}]:
                     uri = instance.get("uri", site.get("@name", "unknown-uri"))
@@ -39,7 +47,7 @@ class ZAPParser:
                             status=VulnStatus.DETECTED,
                             category="DAST",
                             cwe_id=str(alert.get("cweid")) if alert.get("cweid") else None,
-                            description=alert.get("desc"),
+                            description=description,
                             location=uri,
                             extra_context={
                                 "plugin_id": plugin_id,

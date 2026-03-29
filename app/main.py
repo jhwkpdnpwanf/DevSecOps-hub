@@ -52,7 +52,7 @@ def healthz():
 
 class IngestRequest(BaseModel):
     project_name: str
-    tool_type: str | ToolType | None = None
+    tool_type: str | ToolType
     report: dict
     initiated_by: str = "ci-pipeline"
     branch: str | None = None
@@ -94,7 +94,7 @@ class IntegrationRequest(BaseModel):
 class S3ImportRequest(BaseModel):
     project_name: str
     s3_key: str
-    tool_type: ToolType | None = None
+    tool_type: str | ToolType | None = None
     initiated_by: str = "aws-import"
 
 
@@ -555,6 +555,8 @@ async def analyze_vuln(vuln_id: int, request: Request, db: Session = Depends(get
 def list_aws_reports(
     request: Request,
     project_name: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=10),
     db: Session = Depends(get_db),
 ):
     
@@ -578,10 +580,20 @@ def list_aws_reports(
         except Exception:
             db.rollback()
 
+        total = len(reports)
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        paginated = reports[start_idx:end_idx]
+        total_pages = (total + page_size - 1) // page_size if total else 1
+
         return {
             "bucket": aws_storage.bucket,
             "project": project_name,
-            "reports": [r.__dict__ for r in reports],
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "total_pages": total_pages,
+            "reports": [r.__dict__ for r in paginated],
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e

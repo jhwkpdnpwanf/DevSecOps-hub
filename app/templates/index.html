@@ -154,7 +154,7 @@
           <p class="muted">프로젝트명을 기준으로 S3 report 목록을 불러와 즉시 import 할 수 있습니다.</p>
           <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
             <input id="s3ProjectName" value="{{ selected_project.name }}" style="min-width:240px;" />
-            <button onclick="loadS3Reports()" style="background:#0f766e; color:#fff; border:none; cursor:pointer;">S3 목록 조회</button>
+            <button onclick="loadS3Reports(true)" style="background:#0f766e; color:#fff; border:none; cursor:pointer;">S3 목록 조회</button>
           </div>
           <div id="s3Status" class="muted" style="margin-top:10px;"></div>
           <div id="s3Reports" style="margin-top:10px;"></div>
@@ -193,6 +193,9 @@
   </div>
 
 <script>
+let s3Page = 1;
+const s3PageSize = 10;
+
 async function logout(e) {
   e.preventDefault();
   await fetch('/auth/logout', { method: 'POST' });
@@ -218,12 +221,13 @@ async function loadPolicies() {
   box.innerHTML = `<table class="table"><thead><tr><th>Name</th><th>Rule</th><th>Priority</th><th>SLA</th></tr></thead><tbody>${data.map(p => `<tr><td>${p.name}</td><td>${p.rule_expression}</td><td>${p.priority_result}</td><td>${p.sla_days}일</td></tr>`).join('')}</tbody></table>`;
 }
 
-async function loadS3Reports() {
+async function loadS3Reports(resetPage = false) {
   const status = document.getElementById('s3Status');
   const reportsBox = document.getElementById('s3Reports');
   if (!status || !reportsBox) return;
 
   const projectName = document.getElementById('s3ProjectName').value.trim();
+  if (resetPage) s3Page = 1;
   if (!projectName) {
     status.textContent = '프로젝트명을 입력하세요.';
     return;
@@ -232,7 +236,7 @@ async function loadS3Reports() {
   status.textContent = 'S3 목록 조회 중...';
   reportsBox.innerHTML = '';
 
-  const resp = await fetch(`/api/aws/reports?project_name=${encodeURIComponent(projectName)}`);
+  const resp = await fetch(`/api/aws/reports?project_name=${encodeURIComponent(projectName)}&page=${s3Page}&page_size=${s3PageSize}`);
   const data = await resp.json();
   if (!resp.ok) {
     status.innerHTML = `<span style="color:#b91c1c;">${data.detail || 'S3 목록 조회 실패'}</span>`;
@@ -240,14 +244,23 @@ async function loadS3Reports() {
   }
 
   const reports = data.reports || [];
-  status.textContent = `Bucket: ${data.bucket}, ${reports.length}개 리포트`;
+  status.textContent = `Bucket: ${data.bucket}, 전체 ${data.total || 0}개 리포트 (페이지 ${data.page || 1}/${data.total_pages || 1})`;
 
   if (!reports.length) {
     reportsBox.innerHTML = '<p class="muted">조회된 리포트가 없습니다.</p>';
     return;
   }
 
-  reportsBox.innerHTML = `<table class="table"><thead><tr><th>S3 Key</th><th>Tool</th><th>Updated</th><th>Import</th></tr></thead><tbody>${reports.map(r => `<tr><td>${r.key}</td><td>${r.tool_type || '-'}</td><td>${r.last_modified || '-'}</td><td><button onclick="importS3Report('${r.key.replace(/'/g, "\\'")}','${projectName.replace(/'/g, "\\'")}')">Import</button></td></tr>`).join('')}</tbody></table>`;
+  const tableHtml = `<table class="table"><thead><tr><th>S3 Key</th><th>Tool Type</th><th>Updated</th><th>Import</th></tr></thead><tbody>${reports.map(r => `<tr><td>${r.key}</td><td>${(r.tool_type || '-').toUpperCase()}</td><td>${r.last_modified || '-'}</td><td><button onclick="importS3Report('${r.key.replace(/'/g, "\\'")}','${projectName.replace(/'/g, "\\'")}')">Import</button></td></tr>`).join('')}</tbody></table>`;
+  const canPrev = (data.page || 1) > 1;
+  const canNext = (data.page || 1) < (data.total_pages || 1);
+  const pagerHtml = `<div style="display:flex; gap:8px; margin-top:10px; align-items:center;"><button ${canPrev ? '' : 'disabled'} onclick="changeS3Page(-1)">이전</button><button ${canNext ? '' : 'disabled'} onclick="changeS3Page(1)">다음</button><span class="muted">${data.page || 1} / ${data.total_pages || 1}</span></div>`;
+  reportsBox.innerHTML = tableHtml + pagerHtml;
+}
+
+function changeS3Page(delta) {
+  s3Page = Math.max(1, s3Page + delta);
+  loadS3Reports();
 }
 
 async function importS3Report(s3Key, projectName) {

@@ -25,6 +25,7 @@ class SemgrepParser:
             seen_keys.add(vulnerability_key)
 
             severity = self.SEVERITY_MAP.get(extra.get("severity"), Severity.MEDIUM)
+            
             shortlink = metadata.get("shortlink")
             title = (
                 metadata.get("message")
@@ -34,6 +35,14 @@ class SemgrepParser:
             if isinstance(title, str) and title.startswith("https://"):
                 title = check_id
 
+            description = (
+                extra.get("message")
+                or metadata.get("message")
+                or metadata.get("short_description")
+                or extra.get("lines")
+                or metadata.get("technology")
+            )
+
             vuln = Vulnerability(
                 scan_id=scan_id,
                 vulnerability_key=vulnerability_key,
@@ -42,7 +51,7 @@ class SemgrepParser:
                 status=VulnStatus.DETECTED,
                 category=metadata.get("category", "SAST"),
                 cwe_id=(metadata.get("cwe") or [None])[0] if isinstance(metadata.get("cwe"), list) else metadata.get("cwe"),
-                description=extra.get("message") or metadata.get("technology"),
+                description=description,
                 location=path,
                 line_number=line,
                 extra_context={

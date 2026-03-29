@@ -37,6 +37,7 @@ from app.services.db_service import save_scan_results
 from app.services.policy_service import PolicyEngine
 from app.services.aws_storage_service import AWSStorageService
 from app.services.integration_service import notify_integrations
+from app.services.dast_service import DASTScanService
 
 init_db()
 app = FastAPI(title="DevSecOps-hub API")
@@ -45,6 +46,7 @@ templates = Jinja2Templates(directory="app/templates")
 ai_service = AISecurityService()
 md = MarkdownIt("commonmark", {"html": False, "linkify": True})
 aws_storage = AWSStorageService()
+dast_service = DASTScanService()
 
 @app.get("/healthz")
 def healthz():
@@ -97,6 +99,13 @@ class S3ImportRequest(BaseModel):
     tool_type: str | ToolType | None = None
     initiated_by: str = "aws-import"
 
+class DASTRunRequest(BaseModel):
+    project_name: str
+    target_url: str
+    initiated_by: str = "dast-runner"
+    branch: str | None = None
+    commit_sha: str | None = None
+    pipeline_run_id: str | None = None
 
 def _map_role_by_email(email: str) -> UserRole:
     lowered = email.lower()
@@ -712,6 +721,57 @@ def ingest_from_s3_for_ci(
         "scan_id": scan_id,
         "tool_type": tool_type.value,
         "s3_key": payload.s3_key,
+        "vulnerability_count": len(vulnerabilities),
+    }
+
+@app.post("/api/dast/run")
+def run_dast_scan(payload: DASTRunRequest, request: Request, db: Session = Depends(get_db)):
+    current_user = _get_session_user(request, db)
+    if not _can_operate(current_user):
+        raise HTTPException(status_code=403, detail="운영 액션 권한이 없습니다.")
+
+    project = _ensure_project_with_token(db, payload.project_name)
+
+    try:
+        run_result = dast_service.run_baseline_scan(payload.target_url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    vulnerabilities = ZAPParser().parse(run_result.report, scan_id=0)
+    scan_id = save_scan_results(
+        db,
+        project.id,
+        ToolType.DAST,
+        vulnerabilities,
+        initiated_by=payload.initiated_by or current_user.username,
+        branch=payload.branch,
+        commit_sha=payload.commit_sha,
+        pipeline_run_id=payload.pipeline_run_id,
+    )
+
+    write_audit_log(
+        db,
+        actor=current_user.username,
+        action="RUN_DAST_SCAN",
+        target_type="scan",
+        target_id=str(scan_id),
+        details={
+            "project": project.name,
+            "target_url": payload.target_url,
+            "exit_code": run_result.exit_code,
+            "tool_type": ToolType.DAST.value,
+        },
+    )
+    db.commit()
+
+    return {
+        "project": project.name,
+        "scan_id": scan_id,
+        "tool_type": ToolType.DAST.value,
+        "target_url": payload.target_url,
+        "exit_code": run_result.exit_code,
         "vulnerability_count": len(vulnerabilities),
     }
 

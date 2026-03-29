@@ -19,6 +19,7 @@ jobs:
       HUB_URL: ${{ secrets.DEVSECOPS_HUB_URL }}
       PROJECT_NAME: ${{ secrets.DEVSECOPS_PROJECT_NAME }}
       PROJECT_TOKEN: ${{ secrets.DEVSECOPS_PROJECT_TOKEN }}
+      DAST_TARGET_URL: ${{ secrets.DEVSECOPS_HUB_URL }}
 
     steps:
       - name: Checkout
@@ -48,7 +49,7 @@ jobs:
         run: |
           pip-audit -r requirements.txt --format json > pip_audit_report.json || true
 
-      - name: Upload reports to S3
+      - name: Upload SAST/SCA reports to S3
         id: upload
         run: |
           RUN_ID="${{ github.run_id }}"
@@ -63,55 +64,27 @@ jobs:
 
       - name: Verify uploaded objects exist
         run: |
-          echo "SAST_KEY=${{ steps.upload.outputs.sast_key }}"
-          echo "SCA_KEY=${{ steps.upload.outputs.sca_key }}"
           aws s3api head-object --bucket "${S3_BUCKET}" --key "${{ steps.upload.outputs.sast_key }}"
           aws s3api head-object --bucket "${S3_BUCKET}" --key "${{ steps.upload.outputs.sca_key }}"
 
-      - name: Preview SAST JSON from S3
-        run: |
-          aws s3 cp "s3://${S3_BUCKET}/${{ steps.upload.outputs.sast_key }}" /tmp/sast.json
-          python - <<'PY'
-          import json
-          p="/tmp/sast.json"
-          with open(p,"r",encoding="utf-8") as f:
-              d=json.load(f)
-          print("json_ok, top_keys=", list(d.keys())[:10])
-          print("results_count=", len(d.get("results", [])))
-          PY
-
-      - name: Debug Hub import response (Semgrep)
-        run: |
-          curl -i -sS -X POST "${HUB_URL}/api/ingest-from-s3" \
-            -H "Content-Type: application/json" \
-            -H "X-Project-Token: ${PROJECT_TOKEN}" \
-            -d '{
-              "project_name": "${{ env.PROJECT_NAME }}",
-              "s3_key": "${{ steps.upload.outputs.sast_key }}",
-              "tool_type": "Semgrep",
-              "initiated_by": "github-actions"
-            }'
-          
       - name: Trigger Hub Import (Semgrep)
         run: |
           curl -i --fail-with-body -sS -X POST "${HUB_URL}/api/ingest-from-s3" \
             -H "Content-Type: application/json" \
             -H "X-Project-Token: ${PROJECT_TOKEN}" \
-            -d '{
-              "project_name": "${{ env.PROJECT_NAME }}",
-              "s3_key": "${{ steps.upload.outputs.sast_key }}",
-              "tool_type": "Semgrep",
-              "initiated_by": "github-actions"
-            }'
+            -d "{\"project_name\":\"${PROJECT_NAME}\",\"s3_key\":\"${{ steps.upload.outputs.sast_key }}\",\"tool_type\":\"Semgrep\",\"initiated_by\":\"github-actions\",\"pipeline_run_id\":\"${{ github.run_id }}\",\"branch\":\"${{ github.ref_name }}\",\"commit_sha\":\"${{ github.sha }}\"}"
 
       - name: Trigger Hub Import (pip-audit)
         run: |
           curl -i --fail-with-body -sS -X POST "${HUB_URL}/api/ingest-from-s3" \
             -H "Content-Type: application/json" \
             -H "X-Project-Token: ${PROJECT_TOKEN}" \
-            -d '{
-              "project_name": "${{ env.PROJECT_NAME }}",
-              "s3_key": "${{ steps.upload.outputs.sca_key }}",
-              "tool_type": "pip-audit",
-              "initiated_by": "github-actions"
-            }'
+            -d "{\"project_name\":\"${PROJECT_NAME}\",\"s3_key\":\"${{ steps.upload.outputs.sca_key }}\",\"tool_type\":\"pip-audit\",\"initiated_by\":\"github-actions\",\"pipeline_run_id\":\"${{ github.run_id }}\",\"branch\":\"${{ github.ref_name }}\",\"commit_sha\":\"${{ github.sha }}\"}"
+
+      - name: Trigger Hub DAST run
+        if: ${{ env.DAST_TARGET_URL != '' }}
+        run: |
+          curl -i --fail-with-body -sS -X POST "${HUB_URL}/api/dast/run-for-ci" \
+            -H "Content-Type: application/json" \
+            -H "X-Project-Token: ${PROJECT_TOKEN}" \
+            -d "{\"project_name\":\"${PROJECT_NAME}\",\"target_url\":\"${DAST_TARGET_URL}\",\"initiated_by\":\"github-actions:dast\",\"pipeline_run_id\":\"${{ github.run_id }}\",\"branch\":\"${{ github.ref_name }}\",\"commit_sha\":\"${{ github.sha }}\"}"

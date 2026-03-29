@@ -725,12 +725,23 @@ def ingest_from_s3_for_ci(
     }
 
 @app.post("/api/dast/run")
-def run_dast_scan(payload: DASTRunRequest, request: Request, db: Session = Depends(get_db)):
-    current_user = _get_session_user(request, db)
-    if not _can_operate(current_user):
-        raise HTTPException(status_code=403, detail="운영 액션 권한이 없습니다.")
-
-    project = _ensure_project_with_token(db, payload.project_name)
+def run_dast_scan(
+    payload: DASTRunRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    x_project_token: str | None = Header(default=None),
+):
+    current_user: User | None = None
+    if x_project_token:
+        project = _ensure_project_with_token(db, payload.project_name)
+        _validate_project_token(project, x_project_token)
+        actor = payload.initiated_by
+    else:
+        current_user = _get_session_user(request, db)
+        if not _can_operate(current_user):
+            raise HTTPException(status_code=403, detail="운영 액션 권한이 없습니다.")
+        project = _ensure_project_with_token(db, payload.project_name)
+        actor = current_user.username
 
     try:
         run_result = dast_service.run_baseline_scan(payload.target_url)
@@ -745,7 +756,7 @@ def run_dast_scan(payload: DASTRunRequest, request: Request, db: Session = Depen
         project.id,
         ToolType.DAST,
         vulnerabilities,
-        initiated_by=payload.initiated_by or current_user.username,
+        initiated_by=payload.initiated_by if x_project_token else (payload.initiated_by or actor),
         branch=payload.branch,
         commit_sha=payload.commit_sha,
         pipeline_run_id=payload.pipeline_run_id,
@@ -753,7 +764,7 @@ def run_dast_scan(payload: DASTRunRequest, request: Request, db: Session = Depen
 
     write_audit_log(
         db,
-        actor=current_user.username,
+        actor=actor,
         action="RUN_DAST_SCAN",
         target_type="scan",
         target_id=str(scan_id),

@@ -84,7 +84,7 @@ jobs:
       - name: Trigger Hub DAST run
         if: ${{ env.DAST_TARGET_URL != '' }}
         run: |
-          curl -i --fail-with-body -sS -X POST "${HUB_URL}/api/dast/run-for-ci" \
+          curl -i --fail-with-body -sS -X POST "${HUB_URL}/api/dast/run" \
             -H "Content-Type: application/json" \
             -H "X-Project-Token: ${PROJECT_TOKEN}" \
             -d "{\"project_name\":\"${PROJECT_NAME}\",\"target_url\":\"${DAST_TARGET_URL}\",\"initiated_by\":\"github-actions:dast\",\"pipeline_run_id\":\"${{ github.run_id }}\",\"branch\":\"${{ github.ref_name }}\",\"commit_sha\":\"${{ github.sha }}\"}"

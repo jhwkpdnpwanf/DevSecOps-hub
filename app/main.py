@@ -37,7 +37,7 @@ from app.services.db_service import save_scan_results
 from app.services.policy_service import PolicyEngine
 from app.services.aws_storage_service import AWSStorageService
 from app.services.integration_service import notify_integrations
-from app.services.dast_service import DASTScanService
+from app.services.data_service import DASTScanService
 
 init_db()
 app = FastAPI(title="DevSecOps-hub API")

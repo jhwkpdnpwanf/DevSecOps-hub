@@ -12,13 +12,8 @@ class AISecurityService:
 
     def _fallback_report(self, title: str, description: str, category: str) -> str:
         return (
-            f"[Fallback 분석]\n"
-            f"- 취약점: {title}\n"
-            f"- 분류: {category}\n"
-            f"- 원인 요약: 입력 검증/권한 검증/의존성 관리 미흡 가능성이 높습니다.\n"
-            f"- 영향: 공격자가 민감정보 접근 또는 서비스 오동작을 유발할 수 있습니다.\n"
-            f"- 조치: 취약 코드 위치를 기준으로 검증 로직과 보안 라이브러리 적용, 재스캔을 수행하세요.\n"
-            f"- 상세 설명: {description or '제공된 설명 없음'}"
+            "[Fallback]\n"
+            "Api Key를 다시 확인해주세요.\n"
         )
 
     def analyze_vulnerability(self, title, description, category):

@@ -174,6 +174,7 @@
                   <div class="meta">
                     <span class="sev-badge sev-badge-{{ sev if sev in ['critical','high','medium','low','info'] else 'info' }}">{{ vuln.severity.value }}</span>
                     · <span>{{ vuln.priority.value }}</span>
+                    · <span style="background:#fee2e2; color:#991b1b; padding:2px 6px; border-radius:4px;">Risk {{ vuln.risk_score or 0 }}</span>
                     · <span style="background:#e5e7eb; padding:2px 6px; border-radius:4px;">{{ vuln.status.value }}</span>
                     · <span>{{ vuln.scan.tool_type.value }}</span>
                   </div>

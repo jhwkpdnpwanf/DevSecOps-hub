@@ -331,10 +331,18 @@ def dashboard(
                 db.query(Vulnerability)
                 .join(Vulnerability.scan)
                 .filter(Scan.project_id == selected_project.id)
-                .order_by(Vulnerability.created_at.desc())
-                .limit(100)
                 .all()
             )
+            for vuln in vulns:
+                vuln.risk_score = PolicyEngine.evaluate_risk_score(
+                    severity=vuln.severity,
+                    priority=vuln.priority,
+                    project_criticality=selected_project.business_criticality.value,
+                    exposure=selected_project.exposure.value,
+                    status=vuln.status,
+                )
+            vulns.sort(key=lambda v: (v.risk_score, v.created_at), reverse=True)
+            vulns = vulns[:100]
             severity_stats = (
                 db.query(Vulnerability.severity, func.count(Vulnerability.id))
                 .join(Vulnerability.scan)

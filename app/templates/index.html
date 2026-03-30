@@ -131,26 +131,6 @@
       {% if current_section in ['dashboard','findings'] and selected_project and is_authorized %}
         {% if current_section == 'dashboard' %}
         <div class="panel">
-          <h2 style="color: #1e40af;">최신 스캔 현황</h2>
-          <div class="cards" style="margin-bottom: 30px;">
-            {% for tool_key in ['SAST', 'DAST', 'SCA'] %}
-              <div class="card" style="border-top: 4px solid #60a5fa; min-width: 180px;">
-                <strong style="color: #4b5563;">{{ tool_key }}</strong><br/>
-                {% if latest_scans.get(tool_key) %}
-                  {% set s = latest_scans.get(tool_key) %}
-                  <div style="font-size: 15px; font-weight: bold; margin-top: 5px;">
-                    {{ s.created_at.strftime('%Y-%m-%d %H:%M') }}
-                  </div>
-                  <div class="muted" style="font-size: 11px; margin-top: 4px;">
-                    By: {{ s.initiated_by }}<br/>
-                    {% if s.branch %}Branch: {{ s.branch }}{% endif %}
-                  </div>
-                {% else %}
-                  <div class="muted" style="margin-top: 5px;">스캔 기록 없음</div>
-                {% endif %}
-              </div>
-            {% endfor %}
-          </div>
           <hr style="border: 0; border-top: 1px solid #e5e7eb; margin-bottom: 25px;">
           <h2>{{ selected_project.name }} 통계 요약</h2>
           <div class="cards">

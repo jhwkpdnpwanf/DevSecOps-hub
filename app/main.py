@@ -327,10 +327,21 @@ def dashboard(
             else:
                 latest_scans = {}
 
-            vulns = (
-                db.query(Vulnerability)
+            latest_vuln_ids = (
+                db.query(func.max(Vulnerability.id).label("vuln_id"))
                 .join(Vulnerability.scan)
                 .filter(Scan.project_id == selected_project.id)
+                .group_by(Vulnerability.vulnerability_key)
+                .subquery()
+            )
+            unresolved_statuses = [VulnStatus.DETECTED, VulnStatus.TRIAGED, VulnStatus.IN_PROGRESS]
+
+            vulns = (
+                db.query(Vulnerability)
+                .join(latest_vuln_ids, Vulnerability.id == latest_vuln_ids.c.vuln_id)
+                .join(Vulnerability.scan)
+                .filter(Scan.project_id == selected_project.id)
+                .filter(Vulnerability.status.in_(unresolved_statuses))
                 .all()
             )
             for vuln in vulns:
@@ -343,27 +354,20 @@ def dashboard(
                 )
             vulns.sort(key=lambda v: (v.risk_score, v.created_at), reverse=True)
             vulns = vulns[:100]
-            severity_stats = (
-                db.query(Vulnerability.severity, func.count(Vulnerability.id))
-                .join(Vulnerability.scan)
-                .filter(Scan.project_id == selected_project.id)
-                .group_by(Vulnerability.severity)
-                .all()
-            )
+            severity_counts = {}
+            for v in vulns:
+                severity_counts[v.severity.value] = severity_counts.get(v.severity.value, 0) + 1
+
             stats = {
-                "total": sum(c for _, c in severity_stats),
-                "severity": {s.value: c for s, c in severity_stats},
+                "total": len(vulns),
+                "severity": severity_counts,
             }
 
-            tool_query = (
-                db.query(func.count(Vulnerability.id), Scan.tool_type)
-                .select_from(Vulnerability)
-                .join(Vulnerability.scan)
-                .filter(Scan.project_id == selected_project.id)
-                .group_by(Scan.tool_type)
-                .all()
-            )
-            tool_stats = {tool.value: count for count, tool in tool_query}
+            tool_counts = {}
+            for v in vulns:
+                tool = v.scan.tool_type.value
+                tool_counts[tool] = tool_counts.get(tool, 0) + 1
+            tool_stats = tool_counts
 
     return templates.TemplateResponse(
         request=request,

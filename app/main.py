@@ -303,6 +303,8 @@ def dashboard(
     stats = {"total": 0, "severity": {}}
     tool_stats = {}
 
+    latest_scans = {}
+    
     if project_id:
         selected_project = db.query(Project).filter(Project.id == project_id).first()
         if not selected_project:
@@ -311,6 +313,20 @@ def dashboard(
             permission_error = "현재 계정으로는 해당 프로젝트 접근 권한이 없습니다."
         else:
             is_authorized = True
+
+            latest_scan_ids = (
+                db.query(func.max(Scan.id))
+                .filter(Scan.project_id == selected_project.id)
+                .group_by(Scan.tool_type)
+                .all()
+            )
+            if latest_scan_ids:
+                ids = [i[0] for i in latest_scan_ids]
+                latest_scans_objs = db.query(Scan).filter(Scan.id.in_(ids)).all()
+                latest_scans = {s.tool_type.value: s for s in latest_scans_objs}
+            else:
+                latest_scans = {}
+
             vulns = (
                 db.query(Vulnerability)
                 .join(Vulnerability.scan)
@@ -353,6 +369,7 @@ def dashboard(
             "vulns": vulns,
             "stats": stats,
             "tool_stats": tool_stats,
+            "latest_scans": latest_scans,
         },
     )
 

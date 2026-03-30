@@ -131,6 +131,27 @@
       {% if current_section in ['dashboard','findings'] and selected_project and is_authorized %}
         {% if current_section == 'dashboard' %}
         <div class="panel">
+          <h2 style="color: #1e40af;">최신 스캔 현황</h2>
+          <div class="cards" style="margin-bottom: 30px;">
+            {% for tool_key in ['SAST', 'DAST', 'SCA'] %}
+              <div class="card" style="border-top: 4px solid #60a5fa; min-width: 180px;">
+                <strong style="color: #4b5563;">{{ tool_key }}</strong><br/>
+                {% if latest_scans.get(tool_key) %}
+                  {% set s = latest_scans.get(tool_key) %}
+                  <div style="font-size: 15px; font-weight: bold; margin-top: 5px;">
+                    {{ s.created_at.strftime('%Y-%m-%d %H:%M') }}
+                  </div>
+                  <div class="muted" style="font-size: 11px; margin-top: 4px;">
+                    By: {{ s.initiated_by }}<br/>
+                    {% if s.branch %}Branch: {{ s.branch }}{% endif %}
+                  </div>
+                {% else %}
+                  <div class="muted" style="margin-top: 5px;">스캔 기록 없음</div>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+          <hr style="border: 0; border-top: 1px solid #e5e7eb; margin-bottom: 25px;">
           <h2>{{ selected_project.name }} 통계 요약</h2>
           <div class="cards">
             <div class="card"><strong>Total Findings</strong><br/><span style="font-size:24px; font-weight:bold;">{{ stats.total }}</span></div>
@@ -150,8 +171,8 @@
         </div>
 
         <div class="panel">
-          <h2>S3 리포트 연동</h2>
-          <p class="muted">프로젝트명을 기준으로 S3 report 목록을 불러와 즉시 import 할 수 있습니다.</p>
+          <h2>과거 리포트 조회</h2>
+          <p class="muted">프로젝트명을 기준으로 저장된 S3 report 목록을 불러옵니다.</p>
           <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
             <input id="s3ProjectName" value="{{ selected_project.name }}" style="min-width:240px;" />
             <button onclick="loadS3Reports(true)" style="background:#0f766e; color:#fff; border:none; cursor:pointer;">S3 목록 조회</button>

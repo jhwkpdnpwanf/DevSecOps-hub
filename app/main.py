@@ -4,6 +4,7 @@ import os
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from authlib.integrations.starlette_client import OAuth, OAuthError
 from markdown_it import MarkdownIt
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
@@ -47,6 +48,22 @@ ai_service = AISecurityService()
 md = MarkdownIt("commonmark", {"html": False, "linkify": True})
 aws_storage = AWSStorageService()
 dast_service = DASTScanService()
+oauth = OAuth()
+
+GITHUB_OAUTH_CLIENT_ID = os.getenv("GITHUB_OAUTH_CLIENT_ID")
+GITHUB_OAUTH_CLIENT_SECRET = os.getenv("GITHUB_OAUTH_CLIENT_SECRET")
+GITHUB_OAUTH_ENABLED = bool(GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET)
+
+if GITHUB_OAUTH_ENABLED:
+    oauth.register(
+        name="github",
+        client_id=GITHUB_OAUTH_CLIENT_ID,
+        client_secret=GITHUB_OAUTH_CLIENT_SECRET,
+        access_token_url="https://github.com/login/oauth/access_token",
+        authorize_url="https://github.com/login/oauth/authorize",
+        api_base_url="https://api.github.com/",
+        client_kwargs={"scope": "read:user user:email"},
+    )
 
 @app.get("/healthz")
 def healthz():
@@ -114,6 +131,28 @@ def _map_role_by_email(email: str) -> UserRole:
     if lowered.startswith("sec") or lowered.startswith("security"):
         return UserRole.SECURITY_ANALYST
     if lowered.startswith("view"):
+        return UserRole.VIEWER
+    return UserRole.DEVELOPER
+
+
+def _parse_csv_env_set(name: str) -> set[str]:
+    raw = os.getenv(name, "")
+    return {item.strip().lower() for item in raw.split(",") if item.strip()}
+
+
+def _map_role_by_identity(username: str, email: str | None) -> UserRole:
+    username_l = username.lower()
+    email_l = (email or "").lower()
+
+    admins = _parse_csv_env_set("AUTH_ADMIN_USERS")
+    security_analysts = _parse_csv_env_set("AUTH_SECURITY_USERS")
+    viewers = _parse_csv_env_set("AUTH_VIEWER_USERS")
+
+    if username_l in admins or email_l in admins:
+        return UserRole.ADMIN
+    if username_l in security_analysts or email_l in security_analysts:
+        return UserRole.SECURITY_ANALYST
+    if username_l in viewers or email_l in viewers:
         return UserRole.VIEWER
     return UserRole.DEVELOPER
 
@@ -228,11 +267,18 @@ def _resolve_tool_type(tool_type_raw: str | ToolType | None, s3_key: str) -> Too
 
 @app.get("/auth/login", response_class=HTMLResponse)
 def login_page(request: Request):
-    return templates.TemplateResponse(request=request, name="login.html", context={})
+    return templates.TemplateResponse(
+        request=request,
+        name="login.html",
+        context={"github_oauth_enabled": GITHUB_OAUTH_ENABLED},
+    )
 
 
 @app.post("/auth/mock-login")
 def mock_login(payload: MockLoginRequest, request: Request, db: Session = Depends(get_db)):
+    if GITHUB_OAUTH_ENABLED:
+        raise HTTPException(status_code=403, detail="GitHub OAuth가 활성화되어 Mock 로그인은 비활성화되었습니다.")
+    
     user = db.query(User).filter(User.email == payload.email).first()
     if not user:
         role = _map_role_by_email(payload.email)
@@ -253,6 +299,79 @@ def mock_login(payload: MockLoginRequest, request: Request, db: Session = Depend
     )
     db.commit()
     return {"message": "로그인 완료", "user": user.username, "role": user.role.value}
+
+
+@app.get("/auth/github/login")
+async def github_login(request: Request):
+    if not GITHUB_OAUTH_ENABLED:
+        raise HTTPException(status_code=400, detail="GitHub OAuth 설정이 비어 있습니다.")
+
+    redirect_uri = os.getenv("GITHUB_OAUTH_REDIRECT_URI") or str(request.url_for("github_callback"))
+    return await oauth.github.authorize_redirect(request, redirect_uri)
+
+
+async def _fetch_github_email(token: dict) -> str | None:
+    user_resp = await oauth.github.get("user", token=token)
+    user_data = user_resp.json()
+    email = user_data.get("email")
+    if email:
+        return email
+
+    emails_resp = await oauth.github.get("user/emails", token=token)
+    if emails_resp.status_code >= 400:
+        return None
+
+    for item in emails_resp.json():
+        if item.get("primary") and item.get("verified") and item.get("email"):
+            return item.get("email")
+    return None
+
+
+@app.get("/auth/github/callback")
+async def github_callback(request: Request, db: Session = Depends(get_db)):
+    if not GITHUB_OAUTH_ENABLED:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    try:
+        token = await oauth.github.authorize_access_token(request)
+    except OAuthError as exc:
+        raise HTTPException(status_code=400, detail=f"GitHub OAuth 인증 실패: {exc.error}") from exc
+
+    user_resp = await oauth.github.get("user", token=token)
+    user_data = user_resp.json()
+    github_username = (user_data.get("login") or "").strip()
+    if not github_username:
+        raise HTTPException(status_code=400, detail="GitHub 사용자 정보를 가져오지 못했습니다.")
+
+    email = await _fetch_github_email(token) or f"{github_username}@users.noreply.github.com"
+    role = _map_role_by_identity(github_username, email)
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        user = db.query(User).filter(User.username == github_username).first()
+
+    if not user:
+        user = User(username=github_username, email=email, password="oauth-user", role=role)
+        db.add(user)
+    else:
+        user.username = github_username
+        user.email = email
+        user.role = role
+
+    db.commit()
+    db.refresh(user)
+    request.session["user_id"] = user.id
+
+    write_audit_log(
+        db,
+        actor=user.username,
+        action="LOGIN",
+        target_type="user",
+        target_id=str(user.id),
+        details={"provider": "github", "email": user.email, **_request_meta(request)},
+    )
+    db.commit()
+    return RedirectResponse(url="/", status_code=302)
 
 
 @app.post("/auth/logout")

@@ -22,9 +22,36 @@ class AWSStorageService:
         self.bucket = os.getenv("AWS_S3_REPORT_BUCKET")
         self.region = os.getenv("AWS_REGION", "ap-northeast-2")
         self.prefix_root = os.getenv("AWS_S3_PREFIX_ROOT", "")
+        self.auth_mode = os.getenv("AWS_AUTH_MODE", "oidc_only").lower()
+        self.role_arn = os.getenv("AWS_ROLE_ARN")
+        self.web_identity_token_file = os.getenv("AWS_WEB_IDENTITY_TOKEN_FILE")
+        self._validate_auth_mode()
 
+    def _validate_auth_mode(self) -> None:
+        if self.auth_mode != "oidc_only":
+            raise ValueError(
+                "지원되지 않는 AWS_AUTH_MODE 입니다. 보안 정책상 'oidc_only'만 허용됩니다."
+            )
+
+        access_key = os.getenv("AWS_ACCESS_KEY_ID")
+        secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+        session_token = os.getenv("AWS_SESSION_TOKEN")
+        if access_key or secret_key or session_token:
+            raise ValueError(
+                "정적 AWS 자격증명(AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_SESSION_TOKEN)은 "
+                "허용되지 않습니다. OIDC 기반 AssumeRole만 사용하세요."
+            )
+
+        if not self.role_arn:
+            raise ValueError("AWS_ROLE_ARN 환경변수가 필요합니다. (OIDC AssumeRole 대상 역할)")
+        if not self.web_identity_token_file:
+            raise ValueError(
+                "AWS_WEB_IDENTITY_TOKEN_FILE 환경변수가 필요합니다. (OIDC 토큰 파일 경로)"
+            )
+        
     def _s3_client(self):
-        return boto3.client("s3", region_name=self.region)
+        session = boto3.Session(region_name=self.region)
+        return session.client("s3")
 
     def is_configured(self) -> bool:
         return bool(self.bucket)

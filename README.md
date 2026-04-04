@@ -372,7 +372,45 @@ DevSecOps Hub는 역할 기반 접근 제어(RBAC)를 기반으로 사용자 권
   사용자 인증은 OAuth 2.0 / OpenID Connect(OIDC) 기반 로그인 구조를 사용하며, 인증 완료 후에는 JWT를 세션 토큰으로 활용하여 사용자 상태를 관리합니다.
 
 - **클라우드 접근 인증**: 
-  GitHub Actions는 OIDC 기반 IAM Role Assume 방식을 통해 AWS 리소스에 접근합니다.
+ GitHub Actions와 애플리케이션 런타임 모두 OIDC 기반 IAM Role Assume 방식을 통해 AWS 리소스에 접근합니다.
+
+- **정적 키 금지 정책**:
+  `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`와 같은 장기 Access Key는 사용하지 않습니다.
+  런타임은 `AWS_AUTH_MODE=oidc_only`, `AWS_ROLE_ARN`, `AWS_WEB_IDENTITY_TOKEN_FILE` 구성을 필수로 사용합니다.
+
+<br>
+
+### 환경 변수 설정사항 (Render & GitHub)
+
+#### 1) Render 환경변수
+
+- `AWS_AUTH_MODE=oidc_only`
+- `AWS_REGION=ap-northeast-2`
+- `AWS_S3_REPORT_BUCKET=<prod 계정 S3 버킷명>`
+- `AWS_S3_PREFIX_ROOT=<(선택) 예: reports>`
+- `AWS_ROLE_ARN=<prod 계정에서 S3 읽기 권한을 가진 Role ARN>`
+- `AWS_WEB_IDENTITY_TOKEN_FILE=<Render 런타임에서 제공되는 OIDC 토큰 파일 경로>`
+- `GITHUB_OAUTH_CLIENT_ID=<GitHub OAuth App Client ID>`
+- `GITHUB_OAUTH_CLIENT_SECRET=<GitHub OAuth App Client Secret>`
+- `GITHUB_OAUTH_REDIRECT_URI=<예: https://<render-service>/auth/github/callback>`
+- `AUTH_ADMIN_USERS=<쉼표구분 GitHub username/email 목록>`
+- `AUTH_SECURITY_USERS=<쉼표구분 GitHub username/email 목록>`
+- `AUTH_VIEWER_USERS=<쉼표구분 GitHub username/email 목록>`
+
+
+
+#### 2) GitHub Actions 환경변수(Secrets)
+
+`.github/workflows/security_scan_and_s3_upload.yml` 기준으로 아래 GitHub Secrets가 필요합니다.
+
+- `AWS_REGION`
+- `AWS_S3_REPORT_BUCKET`
+- `AWS_GITHUB_ROLE_ARN` (OIDC로 Assume 할 Role ARN)
+- `DEVSECOPS_HUB_URL`
+- `DEVSECOPS_PROJECT_NAME`
+- `DEVSECOPS_PROJECT_TOKEN`
+
+`id-token: write` 권한 + `aws-actions/configure-aws-credentials`를 통해 OIDC AssumeRole을 수행합니다.
 
 
 <br>

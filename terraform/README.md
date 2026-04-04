@@ -30,6 +30,26 @@ terraform apply -var="github_org=jhwkpdnpwanf" -var="github_repo=DevSecOps-hub"
 - `AWS_REGION`
 - `AWS_S3_REPORT_BUCKET` (terraform output `report_bucket_name`)
 - `AWS_S3_PREFIX_ROOT` (선택)
+- `AWS_AUTH_MODE=oidc_only`
+- `AWS_ROLE_ARN` (S3 조회 대상 IAM Role)
+- `AWS_WEB_IDENTITY_TOKEN_FILE` (OIDC 토큰 파일 경로)
+- `GITHUB_OAUTH_CLIENT_ID`
+- `GITHUB_OAUTH_CLIENT_SECRET`
+- `GITHUB_OAUTH_REDIRECT_URI` (`/auth/github/callback` URL)
+- `AUTH_ADMIN_USERS` (선택, 쉼표 구분)
+- `AUTH_SECURITY_USERS` (선택, 쉼표 구분)
+- `AUTH_VIEWER_USERS` (선택, 쉼표 구분)
+
+
+
+## GitHub Secrets (CI)
+- `AWS_REGION`
+- `AWS_S3_REPORT_BUCKET`
+- `AWS_GITHUB_ROLE_ARN`
+- `DEVSECOPS_HUB_URL`
+- `DEVSECOPS_PROJECT_NAME`
+- `DEVSECOPS_PROJECT_TOKEN`
+
 
 ## 권한 설계
 - 앱 Role: `s3:ListBucket`, `s3:GetObject`, `s3:PutObject`

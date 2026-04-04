@@ -49,21 +49,27 @@
       transition:background 0.15s ease-in-out;
     }
     button:hover { background:#1d4ed8; }
+    .secondary {
+      background: #111827;
+    }
+    .secondary:hover { background: #030712; }
     .hint { color:#6b7280; font-size:13px; margin-top:8px; line-height: 1.45; }
   </style>
 </head>
 <body>
   <div class="card">
     <h2>DevSecOps Hub 로그인</h2>
-    <p class="hint">Mock OAuth: 이메일 패턴으로 자동 권한 부여 (admin*, security*, viewer*, 그 외 developer)</p>
-    <label for="email" class="field-label">이메일</label>
-    <input id="email" type="email" autocomplete="email" placeholder="security-team@example.com" />
-    <button onclick="login()">로그인</button>
-    <p id="msg" class="hint"></p>
+    {% if github_oauth_enabled %}
+      <p class="hint">GitHub OAuth로 로그인합니다.</p>
+      <button class="secondary" onclick="window.location.href='/auth/github/login'">GitHub로 로그인</button>
+    {% else %}
+      <p class="hint">로그인 설정이 비어 있습니다. 관리자에게 GitHub OAuth 설정을 요청하세요.</p>
+    {% endif %}
   </div>
 
 <script>
 async function login() {
+  if (!document.getElementById('email')) return;
   const email = document.getElementById('email').value;
   const resp = await fetch('/auth/mock-login', {
     method: 'POST',

@@ -26,7 +26,6 @@ class AWSStorageService:
         self.role_arn = os.getenv("AWS_ROLE_ARN")
         self.web_identity_token_file = os.getenv("AWS_WEB_IDENTITY_TOKEN_FILE")
         self._session: boto3.Session | None = None
-        self._credentials_validated = False
         self._validate_auth_mode()
 
     def _validate_auth_mode(self) -> None:
@@ -43,45 +42,15 @@ class AWSStorageService:
                 "정적 AWS 자격증명(AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_SESSION_TOKEN)은 "
                 "허용되지 않습니다. OIDC 기반 AssumeRole만 사용하세요."
             )
-
+        
         if self.web_identity_token_file and not self.role_arn:
             raise ValueError(
                 "AWS_WEB_IDENTITY_TOKEN_FILE를 사용할 때는 AWS_ROLE_ARN도 함께 설정해야 합니다."
-            )
-
-    def _assert_runtime_credentials(self, session: boto3.Session) -> None:
-        creds = session.get_credentials()
-        if creds is None:
-            raise ValueError(
-                "AWS 임시 자격증명을 찾을 수 없습니다. OIDC 기반 AssumeRole 또는 런타임 Role 연결을 확인하세요."
-            )
-
-        method = (getattr(creds, "method", "") or "").lower()
-        frozen = creds.get_frozen_credentials()
-
-        if not frozen.token:
-            raise ValueError(
-                "세션 토큰이 없는 AWS 자격증명은 허용되지 않습니다. OIDC/Role 기반 임시 자격증명을 사용하세요."
-            )
-
-        allowed_methods = (
-            "assume-role-with-web-identity",
-            "assume-role",
-            "iam-role",
-            "container-role",
-        )
-        if not any(method.startswith(item) for item in allowed_methods):
-            raise ValueError(
-                f"허용되지 않는 AWS credential source(method={method or 'unknown'}) 입니다. "
-                "OIDC/Role 기반 임시 자격증명만 허용됩니다."
             )
         
     def _s3_client(self):
         if self._session is None:
             self._session = boto3.Session(region_name=self.region)
-        if not self._credentials_validated:
-            self._assert_runtime_credentials(self._session)
-            self._credentials_validated = True
         return self._session.client("s3")
 
     def is_configured(self) -> bool:

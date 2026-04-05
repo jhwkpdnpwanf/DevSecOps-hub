@@ -150,6 +150,7 @@
           </div>
         </div>
 
+        {% if aws_s3_read_enabled %}
         <div class="panel">
           <h2>과거 리포트 조회</h2>
           <p class="muted">프로젝트명을 기준으로 저장된 S3 report 목록을 불러옵니다.</p>
@@ -161,7 +162,8 @@
           <div id="s3Reports" style="margin-top:10px;"></div>
         </div>
         {% endif %}
-
+        {% endif %}
+        
         <div class="panel" style="background:transparent; border:none; padding:0; box-shadow:none;">
           <h2 style="padding-left:5px;">취약점 목록</h2>
           <div class="finding-list">

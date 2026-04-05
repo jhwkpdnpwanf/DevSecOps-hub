@@ -8,7 +8,7 @@ from authlib.integrations.starlette_client import OAuth, OAuthError
 from markdown_it import MarkdownIt
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import func
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -51,12 +51,10 @@ oauth = OAuth()
 
 
 def _resolve_s3_read_enabled() -> bool:
-    raw = os.getenv("AWS_S3_READ_ENABLED", "auto").strip().lower()
+    raw = os.getenv("AWS_S3_READ_ENABLED", "false").strip().lower()
     if raw in {"1", "true", "yes", "on"}:
         return True
-    if raw in {"0", "false", "no", "off"}:
-        return False
-    return bool(os.getenv("AWS_S3_REPORT_BUCKET"))
+    return False
 
 
 AWS_S3_READ_ENABLED = _resolve_s3_read_enabled()
@@ -285,7 +283,7 @@ def _resolve_tool_type(tool_type_raw: str | ToolType | None, s3_key: str) -> Too
 
 def _require_aws_storage() -> AWSStorageService:
     if not AWS_S3_READ_ENABLED:
-        raise HTTPException(status_code=400, detail="AWS S3 조회 기능이 비활성화되어 있습니다. (AWS_S3_READ_ENABLED=false 또는 AWS_S3_REPORT_BUCKET 미설정)")
+        raise HTTPException(status_code=400, detail="AWS S3 조회 기능이 비활성화되어 있습니다. (AWS_S3_READ_ENABLED=false)")
     if aws_storage_init_error:
         raise HTTPException(status_code=400, detail=f"AWS 인증 설정 오류: {aws_storage_init_error}")
     if not aws_storage:
@@ -293,56 +291,6 @@ def _require_aws_storage() -> AWSStorageService:
     if not aws_storage.is_configured():
         raise HTTPException(status_code=400, detail="AWS_S3_REPORT_BUCKET 설정이 필요합니다.")
     return aws_storage
-
-
-def _sync_latest_reports_for_project(db: Session, project: Project, actor: str) -> None:
-    if not aws_storage or not aws_storage.is_configured():
-        return
-
-    try:
-        reports = aws_storage.list_reports(project.name)
-    except Exception:
-        return
-
-    latest_by_tool: dict[ToolType, str] = {}
-    for report in reports:
-        tool_type = _resolve_tool_type(report.tool_type, report.key)
-        if tool_type not in latest_by_tool:
-            latest_by_tool[tool_type] = report.key
-
-    parser_map = {
-        ToolType.SAST: SemgrepParser(),
-        ToolType.SCA: PipAuditParser(),
-        ToolType.DAST: ZAPParser(),
-    }
-
-    for tool_type, key in latest_by_tool.items():
-        s3_path = f"s3://{aws_storage.bucket}/{key}"
-        exists = (
-            db.query(Scan.id)
-            .filter(Scan.project_id == project.id, Scan.s3_report_path == s3_path)
-            .first()
-        )
-        if exists:
-            continue
-
-        parser = parser_map.get(tool_type)
-        if not parser:
-            continue
-        try:
-            report_json = aws_storage.read_report_json(key)
-            vulnerabilities = parser.parse(report_json, scan_id=0)
-            save_scan_results(
-                db,
-                project.id,
-                tool_type,
-                vulnerabilities,
-                initiated_by=f"system:s3-dashboard-sync:{actor}",
-                s3_report_path=s3_path,
-            )
-        except Exception:
-            db.rollback()
-            continue
 
 
 @app.get("/auth/login", response_class=HTMLResponse)
@@ -512,8 +460,7 @@ def dashboard(
             permission_error = "현재 계정으로는 해당 프로젝트 접근 권한이 없습니다."
         else:
             is_authorized = True
-            _sync_latest_reports_for_project(db, selected_project, current_user.username)
-            
+
             latest_scan_ids = (
                 db.query(func.max(Scan.id))
                 .filter(Scan.project_id == selected_project.id)
@@ -527,21 +474,11 @@ def dashboard(
             else:
                 latest_scans = {}
 
-            latest_vuln_ids = (
-                db.query(func.max(Vulnerability.id).label("vuln_id"))
-                .join(Vulnerability.scan)
-                .filter(Scan.project_id == selected_project.id)
-                .group_by(Vulnerability.vulnerability_key)
-                .subquery()
-            )
-            unresolved_statuses = [VulnStatus.DETECTED, VulnStatus.TRIAGED, VulnStatus.IN_PROGRESS]
-
             vulns = (
                 db.query(Vulnerability)
-                .join(latest_vuln_ids, Vulnerability.id == latest_vuln_ids.c.vuln_id)
                 .join(Vulnerability.scan)
                 .filter(Scan.project_id == selected_project.id)
-                .filter(Vulnerability.status.in_(unresolved_statuses))
+                .order_by(desc(Scan.scan_date), desc(Vulnerability.created_at), desc(Vulnerability.id))
                 .all()
             )
             for vuln in vulns:
@@ -552,8 +489,6 @@ def dashboard(
                     exposure=selected_project.exposure.value,
                     status=vuln.status,
                 )
-            vulns.sort(key=lambda v: (v.risk_score, v.created_at), reverse=True)
-            vulns = vulns[:100]
             severity_counts = {}
             for v in vulns:
                 severity_counts[v.severity.value] = severity_counts.get(v.severity.value, 0) + 1
@@ -577,6 +512,7 @@ def dashboard(
             "projects": projects,
             "selected_project": selected_project,
             "is_authorized": is_authorized,
+            "aws_s3_read_enabled": AWS_S3_READ_ENABLED,
             "permission_error": permission_error,
             "vulns": vulns,
             "stats": stats,

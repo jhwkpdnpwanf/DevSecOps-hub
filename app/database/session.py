@@ -8,8 +8,12 @@ from app.database.models import Base
 
 load_dotenv()
 
-DEFAULT_SQLITE_URL = "sqlite:///./devsecops_hub.db"
-DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_SQLITE_URL)
+# DEFAULT_SQLITE_URL = "sqlite:///./devsecops_hub.db"
+# DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_SQLITE_URL)
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL 환경변수가 필요합니다.")
 
 url_obj = make_url(DATABASE_URL)
 DB_BACKEND = url_obj.get_backend_name()

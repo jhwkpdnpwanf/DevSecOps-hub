@@ -548,21 +548,24 @@ def ingest_scan_result(
     project = _ensure_project_with_token(db, payload.project_name)
     _validate_project_token(project, x_project_token)
 
+    tool_type = _resolve_tool_type(payload.tool_type, payload.s3_report_path or "")
+
     parser_map = {
         ToolType.SAST: SemgrepParser(),
         ToolType.SCA: PipAuditParser(),
         ToolType.DAST: ZAPParser(),
     }
 
-    parser = parser_map.get(payload.tool_type)
+    parser = parser_map.get(tool_type)
     if parser is None:
-        raise HTTPException(status_code=400, detail=f"지원하지 않는 파서: {payload.tool_type.value}")
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 파서: {tool_type.value}")
 
     vulnerabilities = parser.parse(payload.report, scan_id=0)
+
     scan_id = save_scan_results(
         db,
         project.id,
-        payload.tool_type,
+        tool_type,
         vulnerabilities,
         initiated_by=payload.initiated_by,
         branch=payload.branch,
@@ -574,7 +577,7 @@ def ingest_scan_result(
     return {
         "project": project.name,
         "scan_id": scan_id,
-        "tool_type": payload.tool_type.value,
+        "tool_type": tool_type.value,
         "vulnerability_count": len(vulnerabilities),
     }
 
@@ -791,7 +794,9 @@ def import_aws_report(payload: S3ImportRequest, request: Request, db: Session = 
         ToolType.SCA: PipAuditParser(),
         ToolType.DAST: ZAPParser(),
     }
+
     parser = parser_map.get(tool_type)
+
     if not parser:
         raise HTTPException(status_code=400, detail=f"지원하지 않는 파서: {tool_type.value}")
 
@@ -856,6 +861,7 @@ def ingest_from_s3_for_ci(
             ToolType.DAST: ZAPParser(),
         }
         parser = parser_map.get(tool_type)
+        
         if not parser:
             raise HTTPException(status_code=400, detail=f"지원하지 않는 파서: {tool_type.value}")
 

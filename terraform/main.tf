@@ -6,6 +6,7 @@ resource "aws_s3_bucket" "reports" {
 
 resource "aws_s3_bucket_versioning" "reports" {
   bucket = aws_s3_bucket.reports.id
+
   versioning_configuration {
     status = "Enabled"
   }
@@ -57,7 +58,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "reports" {
   }
 }
 
-# Runtime app role that can read/list reports (and write if needed)
+############################################################
+# App runtime role (Render / runtime app) - READ ONLY
+############################################################
+
 resource "aws_iam_role" "app_runtime" {
   name = "${var.project_name}-app-runtime-role"
 
@@ -75,47 +79,59 @@ resource "aws_iam_role" "app_runtime" {
   })
 }
 
-resource "aws_iam_policy" "app_s3_policy" {
-  name = "${var.project_name}-app-s3-policy"
+resource "aws_iam_policy" "app_s3_readonly_policy" {
+  name = "${var.project_name}-app-s3-readonly-policy"
 
   policy = jsonencode({
     Version = "2012-10-17",
     Statement = [
       {
-        Sid    = "ListBucket",
-        Effect = "Allow",
-        Action = ["s3:ListBucket"],
+        Sid      = "ListBucket",
+        Effect   = "Allow",
+        Action   = ["s3:ListBucket"],
         Resource = [aws_s3_bucket.reports.arn]
       },
       {
-        Sid    = "ReadWriteReports",
+        Sid    = "ReadReportsOnly",
         Effect = "Allow",
-        Action = ["s3:GetObject", "s3:PutObject", "s3:GetObjectVersion"],
+        Action = [
+          "s3:GetObject",
+          "s3:GetObjectVersion"
+        ],
         Resource = ["${aws_s3_bucket.reports.arn}/*"]
       }
     ]
   })
 }
 
-resource "aws_iam_role_policy_attachment" "app_s3_attach" {
+resource "aws_iam_role_policy_attachment" "app_s3_readonly_attach" {
   role       = aws_iam_role.app_runtime.name
-  policy_arn = aws_iam_policy.app_s3_policy.arn
+  policy_arn = aws_iam_policy.app_s3_readonly_policy.arn
 }
 
-# GitHub Actions OIDC for CI upload/read
+############################################################
+# GitHub Actions OIDC provider
+############################################################
+
 resource "aws_iam_openid_connect_provider" "github" {
   url             = "https://token.actions.githubusercontent.com"
   client_id_list  = ["sts.amazonaws.com"]
   thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
 }
 
-resource "aws_iam_role" "github_actions" {
-  name = "${var.project_name}-github-actions-role"
+############################################################
+# GitHub OIDC upload role - UPLOAD ONLY
+# Restricted to repo + environment
+############################################################
+
+resource "aws_iam_role" "github_oidc_upload" {
+  name = "${var.project_name}-github-oidc-upload-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17",
     Statement = [
       {
+        Sid    = "GitHubActionsOIDCTrust",
         Effect = "Allow",
         Principal = {
           Federated = aws_iam_openid_connect_provider.github.arn
@@ -123,10 +139,8 @@ resource "aws_iam_role" "github_actions" {
         Action = "sts:AssumeRoleWithWebIdentity",
         Condition = {
           StringEquals = {
-            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-          },
-          StringLike = {
-            "token.actions.githubusercontent.com:sub" = "repo:${var.github_org}/${var.github_repo}:*"
+            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com",
+            "token.actions.githubusercontent.com:sub" = "repo:${var.github_org}/${var.github_repo}:environment:${var.github_environment}"
           }
         }
       }
@@ -134,32 +148,40 @@ resource "aws_iam_role" "github_actions" {
   })
 }
 
-resource "aws_iam_policy" "github_actions_s3" {
-  name = "${var.project_name}-github-actions-s3-policy"
+resource "aws_iam_policy" "github_oidc_upload_s3_policy" {
+  name = "${var.project_name}-github-oidc-upload-s3-policy"
 
   policy = jsonencode({
     Version = "2012-10-17",
     Statement = [
       {
-        Sid    = "ListBucket",
-        Effect = "Allow",
-        Action = ["s3:ListBucket"],
+        Sid      = "ListBucket",
+        Effect   = "Allow",
+        Action   = ["s3:ListBucket"],
         Resource = [aws_s3_bucket.reports.arn]
       },
       {
-        Sid    = "PutAndGetReports",
+        Sid    = "PutAndReadReports",
         Effect = "Allow",
-        Action = ["s3:GetObject", "s3:PutObject"],
+        Action = [
+          "s3:GetObject",
+          "s3:GetObjectVersion",
+          "s3:PutObject"
+        ],
         Resource = ["${aws_s3_bucket.reports.arn}/*"]
       }
     ]
   })
 }
 
-resource "aws_iam_role_policy_attachment" "github_actions_attach" {
-  role       = aws_iam_role.github_actions.name
-  policy_arn = aws_iam_policy.github_actions_s3.arn
+resource "aws_iam_role_policy_attachment" "github_oidc_upload_attach" {
+  role       = aws_iam_role.github_oidc_upload.name
+  policy_arn = aws_iam_policy.github_oidc_upload_s3_policy.arn
 }
+
+############################################################
+# RDS
+############################################################
 
 resource "aws_db_subnet_group" "hub_mysql" {
   name       = "${var.project_name}-mysql-subnet-group"
@@ -196,25 +218,25 @@ resource "aws_security_group" "hub_mysql" {
 }
 
 resource "aws_db_instance" "hub_mysql" {
-  identifier                  = "${var.project_name}-mysql"
-  engine                      = "mysql"
-  engine_version              = var.db_engine_version
-  instance_class              = var.db_instance_class
-  allocated_storage           = var.db_allocated_storage
-  db_name                     = var.db_name
-  username                    = var.db_username
-  password                    = var.db_password
-  port                        = 3306
-  db_subnet_group_name        = aws_db_subnet_group.hub_mysql.name
-  vpc_security_group_ids      = [aws_security_group.hub_mysql.id]
-  publicly_accessible         = var.db_publicly_accessible
-  multi_az                    = var.db_multi_az
-  storage_encrypted           = true
-  backup_retention_period     = var.db_backup_retention_period
-  deletion_protection         = var.db_deletion_protection
-  skip_final_snapshot         = true
-  auto_minor_version_upgrade  = true
-  apply_immediately           = true
+  identifier                   = "${var.project_name}-mysql"
+  engine                       = "mysql"
+  engine_version               = var.db_engine_version
+  instance_class               = var.db_instance_class
+  allocated_storage            = var.db_allocated_storage
+  db_name                      = var.db_name
+  username                     = var.db_username
+  password                     = var.db_password
+  port                         = 3306
+  db_subnet_group_name         = aws_db_subnet_group.hub_mysql.name
+  vpc_security_group_ids       = [aws_security_group.hub_mysql.id]
+  publicly_accessible          = var.db_publicly_accessible
+  multi_az                     = var.db_multi_az
+  storage_encrypted            = true
+  backup_retention_period      = var.db_backup_retention_period
+  deletion_protection          = var.db_deletion_protection
+  skip_final_snapshot          = true
+  auto_minor_version_upgrade   = true
+  apply_immediately            = true
   performance_insights_enabled = false
 
   tags = {

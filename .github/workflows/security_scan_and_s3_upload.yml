@@ -9,11 +9,11 @@ on:
 permissions:
   id-token: write
   contents: read
-  actions: write
 
 jobs:
   security-pipeline:
     runs-on: ubuntu-latest
+    environment: prod
     env:
       AWS_REGION: ${{ secrets.AWS_REGION }}
       S3_BUCKET: ${{ secrets.AWS_S3_REPORT_BUCKET }}

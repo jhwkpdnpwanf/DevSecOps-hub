@@ -101,3 +101,9 @@ variable "db_deletion_protection" {
   description = "Enable deletion protection on RDS"
   default     = false
 }
+
+variable "github_environment" {
+  description = "GitHub Actions environment name allowed to assume the OIDC upload role"
+  type        = string
+  default     = "prod"
+}

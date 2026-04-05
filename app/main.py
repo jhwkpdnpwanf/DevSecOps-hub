@@ -789,6 +789,7 @@ def import_aws_report(payload: S3ImportRequest, request: Request, db: Session = 
     report = storage.read_report_json(payload.s3_key)
     
     tool_type = _resolve_tool_type(payload.tool_type, payload.s3_key)
+
     parser_map = {
         ToolType.SAST: SemgrepParser(),
         ToolType.SCA: PipAuditParser(),
@@ -854,12 +855,13 @@ def ingest_from_s3_for_ci(
 
         report = storage.read_report_json(payload.s3_key)
         tool_type = _resolve_tool_type(payload.tool_type, payload.s3_key)
-        
+
         parser_map = {
             ToolType.SAST: SemgrepParser(),
             ToolType.SCA: PipAuditParser(),
             ToolType.DAST: ZAPParser(),
         }
+
         parser = parser_map.get(tool_type)
         
         if not parser:

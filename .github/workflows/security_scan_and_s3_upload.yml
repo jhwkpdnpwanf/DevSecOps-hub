@@ -53,23 +53,28 @@ jobs:
           else
             echo '{"dependencies":[],"vulnerabilities":[]}' > pip_audit_report.json
           fi
-          
+
       - name: Wait for Target to be Ready
         run: |
           for i in {1..18}; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" ${{ env.DAST_TARGET_URL }}/healthz || echo "failed")
-            if [ "$STATUS" -eq 200 ]; then
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${DAST_TARGET_URL}/healthz" || echo "failed")
+            if [ "$STATUS" = "200" ]; then
               exit 0
             fi
             sleep 10
           done
+          echo "Target is not ready"
           exit 1
 
       - name: ZAP DAST Scan (Manual Run)
         run: |
           chmod -R 777 .
-          docker run --rm -v $(pwd):/zap/wrk/:rw --network=host -t ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
-            -t ${{ env.DAST_TARGET_URL }} \
+          docker run --rm \
+            -v "$(pwd):/zap/wrk/:rw" \
+            --network=host \
+            -t ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py \
+            -t "${DAST_TARGET_URL}" \
             -J report_json.json \
             -z "-config connection.timeoutInSecs=60" || true
 
@@ -80,10 +85,10 @@ jobs:
           SAST_KEY="reports/${PROJECT_NAME}/sast/${RUN_ID}/semgrep.json"
           SCA_KEY="reports/${PROJECT_NAME}/sca/${RUN_ID}/pip-audit.json"
           DAST_KEY="reports/${PROJECT_NAME}/dast/${RUN_ID}/zap_report.json"
-          
+
           aws s3 cp semgrep_report.json "s3://${S3_BUCKET}/${SAST_KEY}"
           aws s3 cp pip_audit_report.json "s3://${S3_BUCKET}/${SCA_KEY}"
-          
+
           if [ -f "report_json.json" ]; then
             aws s3 cp report_json.json "s3://${S3_BUCKET}/${DAST_KEY}"
           fi
@@ -92,116 +97,42 @@ jobs:
           echo "sca_key=${SCA_KEY}" >> "$GITHUB_OUTPUT"
           echo "dast_key=${DAST_KEY}" >> "$GITHUB_OUTPUT"
 
-      - name: Ingest Semgrep to Hub
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          import urllib.request
-
-          with open("semgrep_report.json", "r", encoding="utf-8") as f:
-              report = json.load(f)
-
-          payload = {
-              "project_name": os.environ["PROJECT_NAME"],
-              "tool_type": "sast",
-              "report": report,
-              "initiated_by": "github-actions",
-              "branch": os.environ.get("GITHUB_REF_NAME"),
-              "commit_sha": os.environ.get("GITHUB_SHA"),
-              "pipeline_run_id": os.environ.get("GITHUB_RUN_ID"),
-              "s3_report_path": f"s3://{os.environ['S3_BUCKET']}/{os.environ['SAST_KEY']}",
-          }
-
-          req = urllib.request.Request(
-              url=f"{os.environ['HUB_URL']}/api/ingest",
-              data=json.dumps(payload).encode("utf-8"),
-              headers={
-                  "Content-Type": "application/json",
-                  "X-Project-Token": os.environ["PROJECT_TOKEN"],
-              },
-              method="POST",
-          )
-
-          with urllib.request.urlopen(req) as resp:
-              print(resp.read().decode())
-          PY
+      - name: Build Semgrep ingest payload
         env:
           SAST_KEY: ${{ steps.upload.outputs.sast_key }}
+        run: |
+          python automation/build_ingest_payload.py sast semgrep_report.json semgrep_ingest.json
+
+      - name: Ingest Semgrep to Hub
+        run: |
+          python automation/post_ingest.py semgrep_ingest.json
+
+      - name: Build pip-audit ingest payload
+        env:
+          SCA_KEY: ${{ steps.upload.outputs.sca_key }}
+        run: |
+          python automation/build_ingest_payload.py sca pip_audit_report.json pip_audit_ingest.json
 
       - name: Ingest pip-audit to Hub
         run: |
-          python - <<'PY'
-          import json
-          import os
-          import urllib.request
+          python automation/post_ingest.py pip_audit_ingest.json
 
-          with open("pip_audit_report.json", "r", encoding="utf-8") as f:
-              report = json.load(f)
-
-          payload = {
-              "project_name": os.environ["PROJECT_NAME"],
-              "tool_type": "sca",
-              "report": report,
-              "initiated_by": "github-actions",
-              "branch": os.environ.get("GITHUB_REF_NAME"),
-              "commit_sha": os.environ.get("GITHUB_SHA"),
-              "pipeline_run_id": os.environ.get("GITHUB_RUN_ID"),
-              "s3_report_path": f"s3://{os.environ['S3_BUCKET']}/{os.environ['SCA_KEY']}",
-          }
-
-          req = urllib.request.Request(
-              url=f"{os.environ['HUB_URL']}/api/ingest",
-              data=json.dumps(payload).encode("utf-8"),
-              headers={
-                  "Content-Type": "application/json",
-                  "X-Project-Token": os.environ["PROJECT_TOKEN"],
-              },
-              method="POST",
-          )
-
-          with urllib.request.urlopen(req) as resp:
-              print(resp.read().decode())
-          PY
+      - name: Build ZAP ingest payload
+        if: always()
         env:
-          SCA_KEY: ${{ steps.upload.outputs.sca_key }}
+          DAST_KEY: ${{ steps.upload.outputs.dast_key }}
+        run: |
+          if [ ! -f "report_json.json" ]; then
+            echo "report_json.json not found, skipping ZAP payload build"
+            exit 0
+          fi
+          python automation/build_ingest_payload.py dast report_json.json zap_ingest.json
 
       - name: Ingest ZAP to Hub
         if: always()
         run: |
-          if [ -f "report_json.json" ]; then
-            python - <<'PY'
-            import json
-            import os
-            import urllib.request
-
-            with open("report_json.json", "r", encoding="utf-8") as f:
-                report = json.load(f)
-
-            payload = {
-                "project_name": os.environ["PROJECT_NAME"],
-                "tool_type": "dast",
-                "report": report,
-                "initiated_by": "github-actions",
-                "branch": os.environ.get("GITHUB_REF_NAME"),
-                "commit_sha": os.environ.get("GITHUB_SHA"),
-                "pipeline_run_id": os.environ.get("GITHUB_RUN_ID"),
-                "s3_report_path": f"s3://{os.environ['S3_BUCKET']}/{os.environ['DAST_KEY']}",
-            }
-
-            req = urllib.request.Request(
-                url=f"{os.environ['HUB_URL']}/api/ingest",
-                data=json.dumps(payload).encode("utf-8"),
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Project-Token": os.environ["PROJECT_TOKEN"],
-                },
-                method="POST",
-            )
-
-            with urllib.request.urlopen(req) as resp:
-                print(resp.read().decode())
-            PY
+          if [ ! -f "zap_ingest.json" ]; then
+            echo "zap_ingest.json not found, skipping ZAP ingest"
+            exit 0
           fi
-        env:
-          DAST_KEY: ${{ steps.upload.outputs.dast_key }}
+          python automation/post_ingest.py zap_ingest.json

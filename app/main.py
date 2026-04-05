@@ -46,9 +46,27 @@ app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET", "de
 templates = Jinja2Templates(directory="app/templates")
 ai_service = AISecurityService()
 md = MarkdownIt("commonmark", {"html": False, "linkify": True})
-aws_storage = AWSStorageService()
 dast_service = DASTScanService()
 oauth = OAuth()
+
+
+def _resolve_s3_read_enabled() -> bool:
+    raw = os.getenv("AWS_S3_READ_ENABLED", "auto").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(os.getenv("AWS_S3_REPORT_BUCKET"))
+
+
+AWS_S3_READ_ENABLED = _resolve_s3_read_enabled()
+aws_storage: AWSStorageService | None = None
+aws_storage_init_error: str | None = None
+if AWS_S3_READ_ENABLED:
+    try:
+        aws_storage = AWSStorageService()
+    except ValueError as e:
+        aws_storage_init_error = str(e)
 
 GITHUB_OAUTH_CLIENT_ID = os.getenv("GITHUB_OAUTH_CLIENT_ID")
 GITHUB_OAUTH_CLIENT_SECRET = os.getenv("GITHUB_OAUTH_CLIENT_SECRET")
@@ -178,7 +196,7 @@ def _request_meta(request: Request):
     }
 
 def _sync_projects_from_s3(db: Session):
-    if not aws_storage.is_configured():
+    if not aws_storage or not aws_storage.is_configured():
         return
 
     try:
@@ -262,7 +280,69 @@ def _resolve_tool_type(tool_type_raw: str | ToolType | None, s3_key: str) -> Too
             raise HTTPException(status_code=400, detail=f"지원하지 않는 tool_type: {tool_type_raw}. 지원값: {supported}")
         return resolved
 
-    return aws_storage._guess_tool_type_from_key(s3_key)
+    return AWSStorageService._guess_tool_type_from_key(s3_key)
+
+
+def _require_aws_storage() -> AWSStorageService:
+    if not AWS_S3_READ_ENABLED:
+        raise HTTPException(status_code=400, detail="AWS S3 조회 기능이 비활성화되어 있습니다. (AWS_S3_READ_ENABLED=false 또는 AWS_S3_REPORT_BUCKET 미설정)")
+    if aws_storage_init_error:
+        raise HTTPException(status_code=400, detail=f"AWS 인증 설정 오류: {aws_storage_init_error}")
+    if not aws_storage:
+        raise HTTPException(status_code=400, detail="AWS 스토리지 서비스가 초기화되지 않았습니다.")
+    if not aws_storage.is_configured():
+        raise HTTPException(status_code=400, detail="AWS_S3_REPORT_BUCKET 설정이 필요합니다.")
+    return aws_storage
+
+
+def _sync_latest_reports_for_project(db: Session, project: Project, actor: str) -> None:
+    if not aws_storage or not aws_storage.is_configured():
+        return
+
+    try:
+        reports = aws_storage.list_reports(project.name)
+    except Exception:
+        return
+
+    latest_by_tool: dict[ToolType, str] = {}
+    for report in reports:
+        tool_type = _resolve_tool_type(report.tool_type, report.key)
+        if tool_type not in latest_by_tool:
+            latest_by_tool[tool_type] = report.key
+
+    parser_map = {
+        ToolType.SAST: SemgrepParser(),
+        ToolType.SCA: PipAuditParser(),
+        ToolType.DAST: ZAPParser(),
+    }
+
+    for tool_type, key in latest_by_tool.items():
+        s3_path = f"s3://{aws_storage.bucket}/{key}"
+        exists = (
+            db.query(Scan.id)
+            .filter(Scan.project_id == project.id, Scan.s3_report_path == s3_path)
+            .first()
+        )
+        if exists:
+            continue
+
+        parser = parser_map.get(tool_type)
+        if not parser:
+            continue
+        try:
+            report_json = aws_storage.read_report_json(key)
+            vulnerabilities = parser.parse(report_json, scan_id=0)
+            save_scan_results(
+                db,
+                project.id,
+                tool_type,
+                vulnerabilities,
+                initiated_by=f"system:s3-dashboard-sync:{actor}",
+                s3_report_path=s3_path,
+            )
+        except Exception:
+            db.rollback()
+            continue
 
 
 @app.get("/auth/login", response_class=HTMLResponse)
@@ -432,7 +512,8 @@ def dashboard(
             permission_error = "현재 계정으로는 해당 프로젝트 접근 권한이 없습니다."
         else:
             is_authorized = True
-
+            _sync_latest_reports_for_project(db, selected_project, current_user.username)
+            
             latest_scan_ids = (
                 db.query(func.max(Scan.id))
                 .filter(Scan.project_id == selected_project.id)
@@ -720,11 +801,10 @@ def list_aws_reports(
 ):
     
     current_user = _get_session_user(request, db)
-    if not aws_storage.is_configured():
-        raise HTTPException(status_code=400, detail="AWS_S3_REPORT_BUCKET 설정이 필요합니다.")
+    storage = _require_aws_storage()
 
     try:
-        reports = aws_storage.list_reports(project_name)
+        reports = storage.list_reports(project_name)
         reports.sort(key=lambda x: x.last_modified, reverse=True)
         try:
             write_audit_log(
@@ -732,7 +812,7 @@ def list_aws_reports(
                 actor=current_user.username,
                 action="READ_S3_REPORT_LIST",
                 target_type="s3_bucket",
-                target_id=aws_storage.bucket or "-",
+                target_id=storage.bucket or "-",
                 details={**_request_meta(request), "project": project_name, "count": len(reports)},
             )
             db.commit()
@@ -746,7 +826,7 @@ def list_aws_reports(
         total_pages = (total + page_size - 1) // page_size if total else 1
 
         return {
-            "bucket": aws_storage.bucket,
+            "bucket": storage.bucket,
             "project": project_name,
             "page": page,
             "page_size": page_size,
@@ -764,12 +844,11 @@ def import_aws_report(payload: S3ImportRequest, request: Request, db: Session = 
     if not _can_operate(current_user):
         raise HTTPException(status_code=403, detail="운영 액션 권한이 없습니다.")
 
-    if not aws_storage.is_configured():
-        raise HTTPException(status_code=400, detail="AWS_S3_REPORT_BUCKET 설정이 필요합니다.")
+    storage = _require_aws_storage()
 
     project = _ensure_project_with_token(db, payload.project_name)
-    report = aws_storage.read_report_json(payload.s3_key)
-
+    report = storage.read_report_json(payload.s3_key)
+    
     tool_type = _resolve_tool_type(payload.tool_type, payload.s3_key)
     parser_map = {
         ToolType.SAST: SemgrepParser(),
@@ -787,7 +866,7 @@ def import_aws_report(payload: S3ImportRequest, request: Request, db: Session = 
         tool_type,
         vulnerabilities,
         initiated_by=payload.initiated_by or current_user.username,
-        s3_report_path=f"s3://{aws_storage.bucket}/{payload.s3_key}",
+        s3_report_path=f"s3://{storage.bucket}/{payload.s3_key}",
     )
 
     write_audit_log(
@@ -826,14 +905,13 @@ def ingest_from_s3_for_ci(
     db: Session = Depends(get_db),
     x_project_token: str | None = Header(default=None),
 ):
-    if not aws_storage.is_configured():
-        raise HTTPException(status_code=400, detail="AWS_S3_REPORT_BUCKET 설정이 필요합니다.")
+    storage = _require_aws_storage()
 
     try:
         project = _ensure_project_with_token(db, payload.project_name)
         _validate_project_token(project, x_project_token)
 
-        report = aws_storage.read_report_json(payload.s3_key)
+        report = storage.read_report_json(payload.s3_key)
         tool_type = _resolve_tool_type(payload.tool_type, payload.s3_key)
         
         parser_map = {
@@ -852,7 +930,7 @@ def ingest_from_s3_for_ci(
             tool_type,
             vulnerabilities,
             initiated_by=payload.initiated_by,
-            s3_report_path=f"s3://{aws_storage.bucket}/{payload.s3_key}",
+            s3_report_path=f"s3://{storage.bucket}/{payload.s3_key}",
         )
     except HTTPException:
         raise
@@ -944,9 +1022,8 @@ def run_dast_scan(
 def get_presigned_url(request: Request, key: str, db: Session = Depends(get_db)):
     current_user = _get_session_user(request, db)
     _get_session_user(request, db)
-    if not aws_storage.is_configured():
-        raise HTTPException(status_code=400, detail="AWS_S3_REPORT_BUCKET 설정이 필요합니다.")
-    url = aws_storage.get_presigned_download_url(key)
+    storage = _require_aws_storage()
+    url = storage.get_presigned_download_url(key)
 
     write_audit_log(
         db,

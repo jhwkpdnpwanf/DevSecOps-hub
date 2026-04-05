@@ -93,7 +93,7 @@ variable "db_publicly_accessible" {
 variable "db_backup_retention_period" {
   type        = number
   description = "RDS backup retention period in days"
-  default     = 7
+  default     = 1
 }
 
 variable "db_deletion_protection" {

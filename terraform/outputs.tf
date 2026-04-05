@@ -9,8 +9,8 @@ output "app_runtime_role_arn" {
 }
 
 output "github_actions_role_arn" {
-  value       = aws_iam_role.github_actions.arn
-  description = "Role ARN for GitHub Actions OIDC"
+  description = "IAM role ARN for GitHub OIDC upload"
+  value       = aws_iam_role.github_oidc_upload.arn
 }
 
 output "rds_mysql_endpoint" {

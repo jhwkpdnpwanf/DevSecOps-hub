@@ -44,6 +44,11 @@ terraform apply
 ## 앱 환경변수
 ## Render 환경변수
 
+- `DATABASE_URL=<RDS MySQL 연결 문자열>`
+- `DEVSECOPS_PROJECT_NAME=devsecops-hub`
+- `DEVSECOPS_PROJECT_TOKEN=<프로젝트 API 토큰>`
+- `SESSION_SECRET=<세션 암호화 키>`
+- `OPENAI_API_KEY=<OpenAI API Key>`
 - `GITHUB_OAUTH_CLIENT_ID=<GitHub OAuth App Client ID>`
 - `GITHUB_OAUTH_CLIENT_SECRET=<GitHub OAuth App Client Secret>`
 - `GITHUB_OAUTH_REDIRECT_URI=<예: https://<render-service>/auth/github/callback>`

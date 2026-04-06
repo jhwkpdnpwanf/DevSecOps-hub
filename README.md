@@ -384,12 +384,6 @@ DevSecOps Hub는 역할 기반 접근 제어(RBAC)를 기반으로 사용자 권
 
 #### 1) Render 환경변수
 
-- `AWS_AUTH_MODE=oidc_only`
-- `AWS_REGION=ap-northeast-2`
-- `AWS_S3_REPORT_BUCKET=<prod 계정 S3 버킷명>`
-- `AWS_S3_PREFIX_ROOT=<(선택) 예: reports>`
-- `AWS_ROLE_ARN=<prod 계정에서 S3 읽기 권한을 가진 Role ARN>`
-- `AWS_WEB_IDENTITY_TOKEN_FILE=<Render 런타임에서 제공되는 OIDC 토큰 파일 경로>`
 - `GITHUB_OAUTH_CLIENT_ID=<GitHub OAuth App Client ID>`
 - `GITHUB_OAUTH_CLIENT_SECRET=<GitHub OAuth App Client Secret>`
 - `GITHUB_OAUTH_REDIRECT_URI=<예: https://<render-service>/auth/github/callback>`

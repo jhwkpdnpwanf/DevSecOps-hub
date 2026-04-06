@@ -42,19 +42,14 @@ terraform apply
 <br>
 
 ## 앱 환경변수
-- `AWS_REGION`
-- `AWS_S3_REPORT_BUCKET` (terraform output `report_bucket_name`)
-- `AWS_S3_PREFIX_ROOT` (선택)
-- `AWS_AUTH_MODE=oidc_only`
-- `AWS_ROLE_ARN` (S3 조회 대상 IAM Role)
-- `AWS_WEB_IDENTITY_TOKEN_FILE` (OIDC 토큰 파일 경로)
-- `GITHUB_OAUTH_CLIENT_ID`
-- `GITHUB_OAUTH_CLIENT_SECRET`
-- `GITHUB_OAUTH_REDIRECT_URI` (`/auth/github/callback` URL)
-- `AUTH_ADMIN_USERS` (선택, 쉼표 구분)
-- `AUTH_SECURITY_USERS` (선택, 쉼표 구분)
-- `AUTH_VIEWER_USERS` (선택, 쉼표 구분)
+## Render 환경변수
 
+- `GITHUB_OAUTH_CLIENT_ID=<GitHub OAuth App Client ID>`
+- `GITHUB_OAUTH_CLIENT_SECRET=<GitHub OAuth App Client Secret>`
+- `GITHUB_OAUTH_REDIRECT_URI=<예: https://<render-service>/auth/github/callback>`
+- `AUTH_ADMIN_USERS=<쉼표구분 GitHub username/email 목록>`
+- `AUTH_SECURITY_USERS=<쉼표구분 GitHub username/email 목록>`
+- `AUTH_VIEWER_USERS=<쉼표구분 GitHub username/email 목록>`
 
 
 ## GitHub Secrets (CI)
